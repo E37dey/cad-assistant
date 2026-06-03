@@ -364,7 +364,8 @@ textarea::placeholder{color:var(--t3)}
   <button class="btnx" onclick="doBOM()">📋 BOM</button>
   <button class="btnx o" onclick="doWeightOpt()" id="woptBtn">⚖ אופטימיזציית משקל</button>
   <button class="btnx p" onclick="doCompare()" id="cmpBtn">🔀 השוואת וריאנטים</button>
-  <button class="btnx" onclick="deleteLast()" style="background:#5a1a1a;color:#ff6b6b;border-color:#7a2a2a">🗑 מחק אחרון</button>
+  <button class="btnx" onclick="deleteLast()" style="background:#5a1a1a;color:#ff6b6b;border-color:#7a2a2a" title="בטל את הבנייה האחרונה של ה-session">🗑 מחק אחרון</button>
+  <button class="btnx" onclick="clearModel()" style="background:#6a1414;color:#ff8080;border-color:#8a2020" title="מחק את כל הגופים במודל (ניתן לשחזר עם Ctrl+Z)">🧹 נקה מודל</button>
   <button class="btnx" onclick="genDrawing()" style="background:#1a3a5a;color:#6ab0ff;border-color:#2a5a8a" title="צור שרטוט מכני + GD&T מהמודל הנוכחי">📐 שרטוט+GD&T</button>
   <button class="btnx" onclick="explainTimeline()" style="background:#1a3a2a;color:#6affaa;border-color:#2a6a4a" title="הסבר מה עשה כל שלב בציר הזמן">💬 הסבר מודל</button>
 </div>
@@ -830,6 +831,11 @@ function doBOM(){
 }
 function deleteLast(){
   adsk.fusionSendData('delete_last','{}');
+}
+function clearModel(){
+  if(!confirm('למחוק את כל הגופים במודל?\n(ניתן לשחזר עם Ctrl+Z ב-Fusion)')) return;
+  addMsg('system','מנקה את המודל...');
+  adsk.fusionSendData('clear_model','{}');
 }
 function doWeightOpt(){
   adsk.fusionSendData('weight_opt',JSON.stringify({

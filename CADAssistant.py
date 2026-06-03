@@ -1333,6 +1333,44 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                     _last_timeline_mark = 0
                     _exec_result = {'ok': True, 'msg': f'מחק {deleted} פעולות'}
 
+            elif mode == 'clear_model':
+                # Delete EVERYTHING in the active design. Unlike delete_last this
+                # is session-independent — it removes a model built any time,
+                # including before a reload. Undoable in Fusion via Ctrl+Z.
+                design = adsk.fusion.Design.cast(_app.activeProduct)
+                if not design:
+                    _exec_result = {'ok': False, 'msg': 'אין מודל פעיל'}
+                else:
+                    removed = 0
+                    # Parametric designs: wiping the timeline removes all
+                    # features, sketches and the bodies they produced.
+                    try:
+                        tl = design.timeline
+                        for i in range(tl.count - 1, -1, -1):
+                            try:
+                                tl.item(i).entity.deleteMe()
+                                removed += 1
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    # Direct-modeling fallback: delete any bodies left over.
+                    try:
+                        bodies = design.rootComponent.bRepBodies
+                        for i in range(bodies.count - 1, -1, -1):
+                            try:
+                                bodies.item(i).deleteMe()
+                                removed += 1
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    _last_timeline_mark = 0
+                    if removed > 0:
+                        _exec_result = {'ok': True, 'msg': f'נוקו {removed} פריטים מהמודל'}
+                    else:
+                        _exec_result = {'ok': False, 'noop': True, 'msg': 'המודל כבר ריק'}
+
             elif mode == 'get_context':
                 ctx = _get_model_context()
                 _exec_result = {'ok': True, 'context': ctx}
@@ -2634,6 +2672,17 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
                     else:
                         _send('error', res.get('msg', 'שגיאה במחיקה'))
                 threading.Thread(target=_del, daemon=True).start()
+
+            elif action == 'clear_model':
+                def _clear():
+                    res = _fire_and_wait({'mode': 'clear_model'}, timeout=30)
+                    if res.get('ok'):
+                        _send('success', res.get('msg', 'המודל נוקה'))
+                    elif res.get('noop'):
+                        _send('system', res.get('msg', ''))
+                    else:
+                        _send('error', res.get('msg', 'שגיאה בניקוי המודל'))
+                threading.Thread(target=_clear, daemon=True).start()
 
             elif action == 'run_direct_code':
                 code = data.get('code', '').strip()
