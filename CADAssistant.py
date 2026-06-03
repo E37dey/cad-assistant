@@ -631,12 +631,21 @@ RESET_KEYWORDS   = ['חדש', 'new', 'התחל', 'start', 'reset', 'חלק חד�
 # AI CALLS
 # ══════════════════════════════════════════════════════════════
 
-def _call_claude(system, messages, max_tokens=8192):
-    """Call Claude API with multi-turn messages list."""
+def _call_claude(system, messages, max_tokens=8192, temperature=0.0):
+    """Call Claude API with multi-turn messages list.
+
+    temperature=0 → deterministic, consistent code (was defaulting to 1.0,
+    which made the same request produce different/imprecise geometry each time).
+    The system prompt is sent as a cache_control block so repeated calls
+    (retries, successive builds) reuse it instead of re-processing it — faster
+    and cheaper.
+    """
     payload = json.dumps({
         'model': CLAUDE_MODEL,
         'max_tokens': max_tokens,
-        'system': system,
+        'temperature': temperature,
+        'system': [{'type': 'text', 'text': system,
+                    'cache_control': {'type': 'ephemeral'}}],
         'messages': messages,
     }).encode('utf-8')
 
