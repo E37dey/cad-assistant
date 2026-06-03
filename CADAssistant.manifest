@@ -1,0 +1,13 @@
+{
+   "autodeskProduct": "Fusion360",
+   "type": "addin",
+   "id": "cadAssistant_20240101",
+   "author": "User",
+   "description": {
+      "": "CAD Assistant - Create 3D models through chat with local AI"
+   },
+   "version": "1.0.0",
+   "runOnStartup": true,
+   "supportedOS": "windows|mac",
+   "editEnabled": true
+}

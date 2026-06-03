@@ -1,0 +1,20 @@
+# ─── SECRETS — never commit these ───────────────────────────────
+# .cadassist_config.json contains the live Anthropic (Claude) API key
+.cadassist_config.json
+.env
+.env.*
+*.key
+secrets.json
+
+# ─── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ─── Editor / IDE ───────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ─── OS cruft ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

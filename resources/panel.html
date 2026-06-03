@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>CAD Assistant</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#16181d;--s1:#1e2127;--s2:#252930;--s3:#2e333c;
+  --b1:#353b45;--b2:#424a57;
+  --t1:#e2e5ea;--t2:#9aa0ad;--t3:#555e6d;
+  --accent:#5b8af0;--ah:#4a78df;
+  --green:#3dba7a;--red:#e05252;--yellow:#e0a030;--purple:#9b72e8;--orange:#e07540;
+  --r:6px;
+}
+body{background:var(--bg);color:var(--t1);font-family:'Segoe UI',Arial,sans-serif;
+  font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--b1);border-radius:2px}
+
+/* ── Header ── */
+.header{background:var(--s1);padding:9px 14px;display:flex;align-items:center;
+  justify-content:space-between;border-bottom:1px solid var(--b1);flex-shrink:0}
+.hlogo{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--purple));
+  border-radius:7px;display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:800;color:#fff;letter-spacing:-1px}
+.htitle{font-weight:700;font-size:14px;color:#fff}
+.hsub{font-size:10px;color:var(--t3);margin-top:1px}
+.hright{display:flex;align-items:center;gap:8px}
+.sdot{width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0}
+.sdot.busy{background:var(--yellow);animation:pulse 1s infinite}
+.sdot.err{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Mode toggle ── */
+.mode-bar{background:var(--s2);display:flex;border-bottom:1px solid var(--b1);flex-shrink:0}
+.mode-btn{flex:1;padding:8px 6px;border:none;background:transparent;color:var(--t3);
+  font-size:11px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;
+  transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px}
+.mode-btn.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--s3)}
+.mode-btn:hover:not(.active){color:var(--t1);background:var(--s3)}
+.mode-icon{font-size:13px}
+
+/* ── Provider tabs ── */
+.prov-bar{background:var(--s1);display:flex;border-bottom:1px solid var(--b1);flex-shrink:0}
+.prov-btn{flex:1;padding:7px;border:none;background:transparent;color:var(--t3);
+  font-size:10px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;
+  transition:all .15s;letter-spacing:.3px}
+.prov-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.prov-btn:hover:not(.active){color:var(--t1)}
+
+/* ── Settings panels ── */
+.sett{background:var(--s1);padding:9px 14px;border-bottom:1px solid var(--b1);flex-shrink:0}
+.sett.hidden{display:none}
+.row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.row:last-child{margin-bottom:0}
+.row label{font-size:10px;color:var(--t2);white-space:nowrap;min-width:55px}
+.row select,.row input{background:var(--bg);color:var(--t1);border:1px solid var(--b1);
+  border-radius:var(--r);padding:4px 8px;font-size:11px;flex:1;outline:none;
+  transition:border-color .15s}
+.row select:focus,.row input:focus{border-color:var(--accent)}
+.row input[type="password"]{letter-spacing:2px}
+.btnx{background:var(--accent);color:#fff;border:none;border-radius:var(--r);
+  padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;
+  white-space:nowrap;transition:background .15s}
+.btnx:hover{background:var(--ah)}
+.btnx.g{background:var(--green)}.btnx.g:hover{background:#32a86a}
+.btnx.o{background:var(--orange)}.btnx.o:hover{background:#c0622f}
+.btnx.p{background:var(--purple)}.btnx.p:hover{background:#7d5bc7}
+.btnx:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── Options bar ── */
+.opts{background:var(--s2);padding:9px 14px;border-bottom:1px solid var(--b1);flex-shrink:0}
+.opts.hidden{display:none}
+.opts-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px}
+.og label{display:block;font-size:9px;color:var(--t3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}
+.og select{width:100%;background:var(--bg);color:var(--t1);border:1px solid var(--b1);
+  border-radius:var(--r);padding:4px 7px;font-size:11px;outline:none;
+  transition:border-color .15s}
+.og select:focus{border-color:var(--accent)}
+
+/* pills */
+.pills{display:flex;gap:5px;margin-top:2px}
+.pill{flex:1;text-align:center;padding:5px 4px;background:var(--bg);
+  border:1px solid var(--b1);border-radius:var(--r);font-size:10px;font-weight:700;
+  color:var(--t3);cursor:pointer;transition:all .15s;user-select:none}
+.pill.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.pill:hover:not(.active){border-color:var(--accent);color:var(--t1)}
+.pill.disabled{opacity:.3;pointer-events:none}
+
+/* ── Progress ── */
+.prog-wrap{background:var(--s1);padding:0 14px;flex-shrink:0;
+  overflow:hidden;max-height:0;transition:max-height .3s,padding .3s}
+.prog-wrap.on{max-height:42px;padding:8px 14px}
+.prog-lbl{font-size:10px;color:var(--t2);margin-bottom:4px}
+.prog-track{background:var(--b1);border-radius:10px;height:4px;overflow:hidden}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));
+  border-radius:10px;transition:width .4s ease}
+
+/* ── Material props card ── */
+.mat-card{background:var(--s3);border:1px solid var(--b1);border-radius:var(--r);
+  padding:8px 10px;margin:0 14px 0;flex-shrink:0;display:none}
+.mat-card.on{display:block}
+.mat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 8px}
+.mat-prop{text-align:center}
+.mat-prop .val{font-size:13px;font-weight:700;color:var(--accent)}
+.mat-prop .lbl{font-size:9px;color:var(--t3)}
+
+/* ── Export toolbar ── */
+.export-bar{background:var(--s2);padding:6px 14px;border-bottom:1px solid var(--b1);
+  flex-shrink:0;display:none;align-items:center;gap:7px;flex-wrap:wrap}
+.export-bar.on{display:flex}
+.export-lbl{font-size:10px;color:var(--t2);flex:1;white-space:nowrap}
+
+/* ── Log ── */
+.log{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:7px}
+.msg{display:flex;flex-direction:column;gap:2px}
+.mlbl{font-size:10px;font-weight:700;letter-spacing:.8px}
+.mbody{color:var(--t1);line-height:1.55;word-break:break-word}
+.msg.system .mlbl{color:var(--accent)}
+.msg.success .mlbl{color:var(--green)}
+.msg.error   .mlbl{color:var(--red)}
+.msg.user    .mlbl{color:var(--yellow)}
+.msg.code    .mlbl{color:var(--t3)}
+.msg.done    .mlbl{color:var(--green)}
+.msg.code .mbody{font-family:Consolas,monospace;font-size:10.5px;background:var(--s1);
+  padding:8px 10px;border-radius:5px;color:#8aaccc;white-space:pre-wrap;
+  direction:ltr;text-align:left;max-height:170px;overflow-y:auto;border:1px solid var(--b1)}
+.msg.error  .mbody{color:var(--red);white-space:pre-wrap}
+.msg.success .mbody{color:var(--green)}
+.msg.done   .mbody{color:var(--green);font-weight:600}
+
+/* analysis card */
+.analysis-card{background:var(--s2);border:1px solid var(--b1);border-left:3px solid var(--purple);
+  border-radius:var(--r);padding:10px 12px;white-space:pre-wrap;font-size:11.5px;
+  line-height:1.6;color:var(--t1)}
+
+/* params table */
+.param-table{width:100%;border-collapse:collapse;font-size:11px}
+.param-table th{background:var(--s3);color:var(--t2);padding:4px 8px;text-align:left;
+  font-size:10px;font-weight:600;border-bottom:1px solid var(--b1)}
+.param-table td{padding:4px 8px;border-bottom:1px solid var(--s3);color:var(--t1)}
+.param-table tr:last-child td{border-bottom:none}
+.param-table .val{color:var(--green);font-family:Consolas,monospace;font-size:10.5px}
+.param-table .expr{color:var(--t3);font-size:10px}
+
+/* validation card */
+.val-card{background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);padding:10px 12px}
+.val-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.val-score{font-size:24px;font-weight:800;line-height:1}
+.val-score.good{color:var(--green)}.val-score.ok{color:var(--yellow)}.val-score.bad{color:var(--red)}
+.val-title{font-size:11px;font-weight:700}.val-sub{font-size:10px;color:var(--t2)}
+.val-issues{display:flex;flex-direction:column;gap:4px}
+.vi{font-size:11px;padding:4px 8px;border-radius:4px;border-left:3px solid}
+.vi.e{background:rgba(224,82,82,.1);border-color:var(--red);color:var(--red)}
+.vi.w{background:rgba(224,160,48,.1);border-color:var(--yellow);color:var(--yellow)}
+.vi.i{background:rgba(91,138,240,.1);border-color:var(--accent);color:var(--accent)}
+.vi-fix{font-size:10px;color:var(--t3);margin-top:2px}
+
+/* ── Image repair area ── */
+.repair-area{padding:10px 14px;flex-shrink:0;display:none;flex-direction:column;gap:8px}
+.repair-area.on{display:flex}
+.drop-zone{background:var(--s3);border:2px dashed var(--b2);border-radius:10px;
+  padding:20px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:rgba(91,138,240,.08)}
+.drop-zone input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.dz-icon{font-size:28px;margin-bottom:6px}
+.dz-text{font-size:11px;color:var(--t2)}
+.dz-sub{font-size:10px;color:var(--t3);margin-top:2px}
+.img-preview{border-radius:8px;max-height:140px;width:100%;object-fit:cover;
+  border:1px solid var(--b1);display:none}
+.img-preview.on{display:block}
+.repair-opts{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.repair-opts .og label{font-size:9px}
+
+/* ── Design input ── */
+.design-input{padding:10px 14px 12px;background:var(--s1);
+  border-top:1px solid var(--b1);flex-shrink:0}
+.design-input.hidden{display:none}
+.hist-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.hist-sel{background:var(--bg);color:var(--t2);border:1px solid var(--b1);
+  border-radius:var(--r);padding:3px 8px;font-size:10px;flex:1;outline:none}
+textarea{width:100%;background:var(--s3);border:1px solid var(--b1);
+  border-radius:var(--r);color:var(--t1);padding:8px 10px;font-size:13px;
+  font-family:inherit;resize:none;outline:none;direction:rtl;
+  min-height:58px;max-height:110px;transition:border-color .15s}
+textarea:focus{border-color:var(--accent)}
+textarea::placeholder{color:var(--t3)}
+.inp-foot{display:flex;justify-content:space-between;align-items:center;
+  margin-top:7px;gap:8px}
+.inp-hints{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.hint{font-size:10px;color:var(--b2)}
+.ctoggle{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3);
+  cursor:pointer;user-select:none}
+.ctoggle input{cursor:pointer;accent-color:var(--accent)}
+.comp-toggle{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--t3);
+  cursor:pointer;user-select:none}
+.send-btn{background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff;
+  border:none;border-radius:var(--r);padding:7px 20px;font-size:12px;
+  font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s}
+.send-btn:hover:not(:disabled){opacity:.88}
+.send-btn:disabled{opacity:.4;cursor:not-allowed}
+.spn{display:inline-block;width:10px;height:10px;border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;
+  margin-left:5px;vertical-align:middle}
+
+/* screenshot */
+.shot-wrap{border-radius:var(--r);overflow:hidden;border:1px solid var(--b1);margin-top:2px}
+.shot-wrap img{width:100%;display:block;border-radius:var(--r)}
+.shot-lbl{font-size:9px;color:var(--t3);text-align:center;padding:3px;
+  background:var(--s3);letter-spacing:.5px}
+
+/* key status */
+.ks-ok{color:var(--green)}.ks-err{color:var(--red)}.ks-warn{color:var(--yellow)}
+
+/* toast */
+.toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%) translateY(30px);
+  background:var(--s3);border:1px solid var(--b1);border-radius:20px;
+  padding:7px 18px;font-size:11px;color:var(--t1);opacity:0;
+  transition:all .3s;pointer-events:none;white-space:nowrap;z-index:99}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div style="display:flex;align-items:center;gap:9px">
+    <div class="hlogo">CA</div>
+    <div><div class="htitle">CAD Assistant</div><div class="hsub">v2 — Fusion 360 AI</div></div>
+  </div>
+  <div class="hright">
+    <button class="btnx" style="font-size:10px;padding:3px 9px" onclick="clearCtx()">נקה הקשר</button>
+    <div class="sdot" id="sdot"></div>
+  </div>
+</div>
+
+<!-- Mode toggle -->
+<div class="mode-bar" style="display:flex;gap:4px;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--b1)">
+  <button class="mode-btn active" id="modeDesign" onclick="setMode('design')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--accent);color:#fff;cursor:pointer">✏️ עיצוב</button>
+  <button class="mode-btn" id="modeQuery" onclick="setMode('query')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--s3);color:var(--t1);cursor:pointer">🔍 שאל</button>
+  <button class="mode-btn" id="modeEdit" onclick="setMode('edit')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--s3);color:var(--t1);cursor:pointer">✂️ ערוך</button>
+  <button class="mode-btn" id="modeParams" onclick="setMode('params')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--s3);color:var(--t1);cursor:pointer">⚙️ פרמטרים</button>
+  <button class="mode-btn" id="modeMfg" onclick="setMode('mfg')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--s3);color:var(--t1);cursor:pointer">🏭 ייצור</button>
+  <button class="mode-btn" id="modeRepair" onclick="setMode('repair')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--s3);color:var(--t1);cursor:pointer">📷 תיקון</button>
+  <button class="mode-btn" id="modeCode" onclick="setMode('code')" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--b1);border-radius:var(--r);background:var(--s3);color:var(--t1);cursor:pointer">💻 קוד</button>
+</div>
+
+<!-- Direct code panel -->
+<div id="codeArea" style="display:none;flex-direction:column;flex:1;padding:10px;gap:8px;overflow:hidden">
+  <div style="font-size:11px;color:var(--t2)">הדבק קוד <code>def build(rootComp, config):</code> ישירות:</div>
+  <textarea id="codeInput" spellcheck="false"
+    style="flex:1;width:100%;background:var(--s2);color:#a8d4a0;border:1px solid var(--b1);
+           border-radius:var(--r);padding:8px;font-family:Consolas,monospace;font-size:11px;
+           resize:none;outline:none;direction:ltr;text-align:left;min-height:200px"
+    placeholder="def build(rootComp, config):&#10;    import adsk.core, adsk.fusion, math&#10;    ..."></textarea>
+  <div style="display:flex;gap:8px">
+    <button onclick="runDirectCode()"
+      style="flex:1;padding:8px;background:var(--green);color:#fff;border:none;
+             border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer">
+      ▶ הרץ קוד
+    </button>
+    <button onclick="document.getElementById('codeInput').value=''"
+      style="padding:8px 12px;background:var(--s3);color:var(--t2);border:1px solid var(--b1);
+             border-radius:var(--r);font-size:12px;cursor:pointer">
+      נקה
+    </button>
+  </div>
+</div>
+
+<!-- Provider tabs -->
+<div class="prov-bar">
+  <button class="prov-btn active" id="pClaude" onclick="setProvider('claude')">Claude</button>
+  <button class="prov-btn" id="pOllama" onclick="setProvider('ollama')">Ollama</button>
+</div>
+
+<!-- Claude settings -->
+<div class="sett" id="settClaude">
+  <div class="row">
+    <label>API Key:</label>
+    <input type="password" id="apiKey" placeholder="sk-ant-api03-..." oninput="keyChanged()"/>
+    <button class="btnx g" onclick="saveKey()">שמור</button>
+    <button class="btnx" id="testBtn" onclick="testKey()" style="padding:4px 8px">בדוק</button>
+  </div>
+  <div class="row" id="keyStatus" style="display:none">
+    <label></label><span id="keyStatusText" style="font-size:10px"></span>
+  </div>
+</div>
+
+
+<!-- Ollama settings -->
+<div class="sett hidden" id="settOllama">
+  <div class="row">
+    <label>מודל:</label>
+    <select id="ollamaModel" onchange="setOllamaModel()">
+      <option value="qwen2.5-coder:7b">qwen2.5-coder:7b (מומלץ)</option>
+      <option value="qwen2.5-coder:14b">qwen2.5-coder:14b (חזק)</option>
+      <option value="qwen2.5-coder:3b">qwen2.5-coder:3b (מהיר)</option>
+      <option value="codellama:7b">codellama:7b</option>
+    </select>
+    <button class="btnx" onclick="detectOllama()" style="padding:4px 8px;white-space:nowrap">זהה</button>
+  </div>
+  <div class="row"><label></label>
+    <span style="font-size:10px;color:var(--t3)" id="ollamaStatusText">לחץ "זהה" לגלות מודלים מותקנים</span>
+  </div>
+</div>
+
+<!-- Options (design mode only) -->
+<div class="opts" id="designOpts">
+  <div class="opts-grid">
+    <div class="og"><label>חומר</label>
+      <select id="material" onchange="showMatProps()">
+        <option>Steel</option><option>Aluminum</option><option>Stainless Steel</option>
+        <option>Cast Iron</option><option>Brass</option><option>Titanium</option>
+        <option>Plastic (ABS)</option><option>Nylon</option>
+      </select>
+    </div>
+    <div class="og"><label>תהליך ייצור</label>
+      <select id="process">
+        <option>CNC Machining</option><option>Turning</option><option>Casting</option>
+        <option>Injection Molding</option><option>3D Print (FDM)</option>
+        <option>3D Print (SLA)</option><option>Sheet Metal</option>
+      </select>
+    </div>
+    <div class="og"><label>רמת פירוט</label>
+      <select id="detail">
+        <option value="quick">מהיר (גאומטריה)</option>
+        <option value="standard" selected>סטנדרטי (+ פילטים)</option>
+        <option value="detailed">מפורט (+ חוטים)</option>
+      </select>
+    </div>
+    <div class="og"><label>יחידות</label>
+      <select id="units">
+        <option value="mm" selected>מילימטר (mm)</option>
+        <option value="in">אינץ' (in)</option>
+      </select>
+    </div>
+  </div>
+  <!-- Output mode -->
+  <div class="pills" id="modePills">
+    <div class="pill active" data-mode="model" onclick="pickMode(this)">מודל 3D</div>
+    <div class="pill" data-mode="model_gdt" onclick="pickMode(this)">+ GD&T</div>
+    <div class="pill" data-mode="full" onclick="pickMode(this)">מלא (+ שרטוט)</div>
+    <div class="pill" data-mode="assembly" onclick="pickMode(this)" style="background:rgba(155,114,232,.15);border-color:#9b72e8;color:#9b72e8">🔩 הרכבה</div>
+  </div>
+</div>
+
+<!-- Material props card -->
+<div class="mat-card" id="matCard"></div>
+
+<!-- Progress bar -->
+<div class="prog-wrap" id="progWrap">
+  <div class="prog-lbl" id="progLbl">מחשב...</div>
+  <div class="prog-track"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+</div>
+
+<!-- Export bar -->
+<div class="export-bar" id="exportBar">
+  <span class="export-lbl">ייצוא:</span>
+  <button class="btnx g" onclick="doExport('step')">⬇ STEP</button>
+  <button class="btnx g" onclick="doExport('stl')">⬇ STL</button>
+  <button class="btnx" onclick="doBOM()">📋 BOM</button>
+  <button class="btnx o" onclick="doWeightOpt()" id="woptBtn">⚖ אופטימיזציית משקל</button>
+  <button class="btnx p" onclick="doCompare()" id="cmpBtn">🔀 השוואת וריאנטים</button>
+  <button class="btnx" onclick="deleteLast()" style="background:#5a1a1a;color:#ff6b6b;border-color:#7a2a2a">🗑 מחק אחרון</button>
+  <button class="btnx" onclick="genDrawing()" style="background:#1a3a5a;color:#6ab0ff;border-color:#2a5a8a" title="צור שרטוט מכני + GD&T מהמודל הנוכחי">📐 שרטוט+GD&T</button>
+  <button class="btnx" onclick="explainTimeline()" style="background:#1a3a2a;color:#6affaa;border-color:#2a6a4a" title="הסבר מה עשה כל שלב בציר הזמן">💬 הסבר מודל</button>
+</div>
+
+<!-- Log -->
+<div class="log" id="log"></div>
+
+<!-- Repair input area -->
+<div class="repair-area" id="repairArea">
+  <div style="background:rgba(224,117,64,.08);border:1px solid rgba(224,117,64,.3);border-radius:var(--r);padding:8px 12px;font-size:11px;color:#e07540;margin-bottom:4px">
+    📷 <strong>שחזור חלק שבור</strong> — צלם חלק שבור, AI יזהה אותו ויצור מודל מותאם להדפסת 3D
+  </div>
+  <div class="drop-zone" id="dropZone"
+       ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
+    <input type="file" id="imgInput" accept="image/*" onchange="fileSelected(event)">
+    <div class="dz-icon">📷</div>
+    <div class="dz-text">גרור תמונה לכאן או לחץ לבחירה</div>
+    <div class="dz-sub">PNG · JPG · WEBP · מקסימום 10MB · צלם מזוויות מרובות לתוצאה טובה יותר</div>
+  </div>
+  <img id="imgPreview" class="img-preview" alt="preview">
+  <div class="repair-opts">
+    <div class="og"><label>חומר הדפסה</label>
+      <select id="printMat">
+        <option>PLA</option><option>PETG</option><option>ABS</option>
+        <option>ASA</option><option>Nylon</option><option>TPU (גמיש)</option>
+        <option>Resin (SLA)</option>
+      </select>
+    </div>
+    <div class="og"><label>סוג החלק</label>
+      <select id="repairCtx">
+        <option value="">בחר סוג...</option>
+        <option value="home appliance part">מוצר חשמלי ביתי</option>
+        <option value="furniture fitting">חיבור רהיטים</option>
+        <option value="car interior part">חלק פנים רכב</option>
+        <option value="garden tool part">כלי גינה</option>
+        <option value="toy part">צעצוע</option>
+        <option value="plumbing fitting">אינסטלציה</option>
+        <option value="bracket or mount">מתקן / סוגר</option>
+        <option value="knob or handle">ידית / כפתור</option>
+        <option value="clip or latch">קליפס / תפס</option>
+      </select>
+    </div>
+  </div>
+  <textarea id="repairDesc" placeholder="תיאור נוסף — מה שבר? מה הגודל המשוער? (לדוגמה: רוחב ~40מ&#34;מ, גובה ~20מ&#34;מ)" style="min-height:52px;max-height:90px"></textarea>
+  <button class="send-btn" id="analyzeBtn" onclick="analyzeImage()" style="width:100%;background:linear-gradient(135deg,#e07540,#9b72e8)">
+    🔍 זהה חלק וצור מודל להדפסה 3D
+  </button>
+  <div style="font-size:9px;color:var(--t3);text-align:center;margin-top:2px">דורש Claude API · מייצר מודל מותאם FDM עם עובי דפנות, fillets ו-tolerances</div>
+</div>
+
+<!-- Design input area -->
+<div class="design-input" id="designInput">
+  <!-- Examples + history -->
+  <div style="margin:-10px -14px 8px;padding:7px 14px;background:var(--s2);border-bottom:1px solid var(--b1)">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px">היסטוריה:</span>
+      <select class="hist-sel" id="histSel" onchange="loadHist()">
+        <option value="">-- בחר מהיסטוריה --</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap">
+      <button onclick="ex('קוביה 50x40x30 מ&#39;&#39;מ פינות מעוגלות R2')" style="background:var(--s3);color:var(--t2);border:1px solid var(--b1);border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">קוביה</button>
+      <button onclick="ex('גליל קוטר 60מ&#39;&#39;מ גובה 80מ&#39;&#39;מ עם חור קוטר 20מ&#39;&#39;מ')" style="background:var(--s3);color:var(--t2);border:1px solid var(--b1);border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">גליל+חור</button>
+      <button onclick="ex('בית מיסב OD 80מ&#39;&#39;מ ID 40מ&#39;&#39;מ גובה 30מ&#39;&#39;מ, 4 חורי M6 על PCD 65מ&#39;&#39;מ')" style="background:var(--s3);color:var(--t2);border:1px solid var(--b1);border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">בית מיסב</button>
+      <button onclick="ex('גל מדורג: קוטר 40מ&#39;&#39;מ ל-30מ&#39;&#39;מ, 3 שלבים')" style="background:var(--s3);color:var(--t2);border:1px solid var(--b1);border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">גל מדורג</button>
+      <button onclick="ex('מסגרת מלבנית 100x80מ&#39;&#39;מ דופן 5מ&#39;&#39;מ גובה 15מ&#39;&#39;מ')" style="background:var(--s3);color:var(--t2);border:1px solid var(--b1);border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">מסגרת</button>
+      <button onclick='ex("גלגל שיניים: מודול 2מ&quot;מ, 24 שיניים, רוחב 15מ&quot;מ, חור ציר 10מ&quot;מ")' style="background:rgba(155,114,232,.15);color:#9b72e8;border:1px solid #9b72e8;border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">⚙ גיר</button>
+      <button onclick='ex("בורג M8 ראש שישה פינות, אורך 30מ&quot;מ, עם הברגה חיצונית נראית")' style="background:rgba(224,117,64,.15);color:#e07540;border:1px solid #e07540;border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">🔩 הברגה</button>
+    </div>
+    <div id="modeExamples" style="display:none;gap:4px;flex-wrap:wrap;padding:4px 10px 0"></div>
+  </div>
+
+  <textarea id="inputBox" placeholder="תאר חלק מכני — לדוגמה: בית מיסב OD 80מ&quot;מ, קוטר פנימי 40מ&quot;מ, גובה 25מ&quot;מ...&#10;&#10;לעריכה: &quot;תוסיף חור M6&quot;, &quot;הגדל גובה ל-50מ&quot;מ&quot;"></textarea>
+  <div class="inp-foot">
+    <div class="inp-hints">
+      <span class="hint">Enter=שלח · Shift+Enter=שורה</span>
+      <label class="ctoggle"><input type="checkbox" id="showCode"> קוד</label>
+      <label class="comp-toggle"><input type="checkbox" id="doCompare"> השוואה</label>
+    </div>
+    <button class="send-btn" id="sendBtn" onclick="send()">שלח ↵</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──
+let busy=false, mode='design', provider='claude', outputMode='model';
+let imgB64='', imgType='image/jpeg';
+let history=JSON.parse(localStorage.getItem('cadHist')||'[]');
+
+const MATPROPS = {
+  'Steel':           {E:200,yield:250,uts:400,density:7.85},
+  'Aluminum':        {E:69, yield:270,uts:310,density:2.70},
+  'Stainless Steel': {E:193,yield:310,uts:620,density:8.00},
+  'Cast Iron':       {E:170,yield:250,uts:350,density:7.20},
+  'Brass':           {E:100,yield:200,uts:350,density:8.50},
+  'Titanium':        {E:114,yield:830,uts:900,density:4.51},
+  'Plastic (ABS)':   {E:2,  yield:40, uts:45, density:1.05},
+  'Nylon':           {E:3,  yield:70, uts:80, density:1.14},
+};
+
+const $=id=>document.getElementById(id);
+const log=$('log'), sdot=$('sdot');
+
+// ── Messages ──
+const LBLS={system:'SYSTEM',success:'SUCCESS',error:'ERROR',user:'YOU',code:'CODE',done:'DONE'};
+
+function addMsg(type,text){
+  const w=document.createElement('div'); w.className='msg '+type;
+  const l=document.createElement('span'); l.className='mlbl'; l.textContent=LBLS[type]||type.toUpperCase();
+  const b=document.createElement('div'); b.className='mbody'; b.textContent=text;
+  w.append(l,b); log.appendChild(w);
+  log.scrollTop=log.scrollHeight;
+  while(log.children.length>200) log.removeChild(log.firstChild);
+}
+
+function addAnalysis(text){
+  const w=document.createElement('div'); w.className='msg';
+  const l=document.createElement('span'); l.className='mlbl'; l.style.color='#9b72e8'; l.textContent='PART ANALYSIS';
+  const b=document.createElement('div'); b.className='analysis-card'; b.textContent=text;
+  w.append(l,b); log.appendChild(w); log.scrollTop=log.scrollHeight;
+}
+
+function addParams(rows){
+  if(!rows||!rows.length) return;
+  const w=document.createElement('div'); w.className='msg';
+  const l=document.createElement('span'); l.className='mlbl'; l.style.color='#e0a030'; l.textContent='PARAMETERS';
+  const t=document.createElement('table'); t.className='param-table';
+  t.innerHTML='<tr><th>שם</th><th>ערך</th><th>יחידה</th><th>ביטוי</th></tr>';
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${r.name}</td><td class="val">${r.val}</td><td>${r.unit}</td><td class="expr">${r.expr}</td>`;
+    t.appendChild(tr);
+  });
+  w.append(l,t); log.appendChild(w); log.scrollTop=log.scrollHeight;
+}
+
+function addScreenshot(b64){
+  const w=document.createElement('div'); w.className='msg';
+  const l=document.createElement('span'); l.className='mlbl'; l.style.color='var(--purple)'; l.textContent='PREVIEW';
+  const wrap=document.createElement('div'); wrap.className='shot-wrap';
+  const img=document.createElement('img');
+  img.src='data:image/png;base64,'+b64;
+  const lbl=document.createElement('div'); lbl.className='shot-lbl'; lbl.textContent='FUSION 360 VIEWPORT';
+  wrap.append(img,lbl); w.append(l,wrap);
+  log.appendChild(w); log.scrollTop=log.scrollHeight;
+}
+
+function addValidation(d){
+  const cls=d.score>=80?'good':d.score>=60?'ok':'bad';
+  const w=document.createElement('div'); w.className='msg';
+  const l=document.createElement('span'); l.className='mlbl'; l.textContent='VALIDATION';
+  const c=document.createElement('div'); c.className='val-card';
+  c.innerHTML=`<div class="val-hdr">
+    <div><div class="val-title">Validation Report</div>
+      <div class="val-sub">${d.errors.length} errors · ${d.warnings.length} warnings · ${d.infos.length} info</div></div>
+    <div class="val-score ${cls}">${d.score}<span style="font-size:13px">/100</span></div>
+  </div><div class="val-issues"></div>`;
+  const vi=c.querySelector('.val-issues');
+  d.errors.slice(0,5).forEach(e=>{
+    vi.insertAdjacentHTML('beforeend',`<div class="vi e"><strong>[${e.id}]</strong> ${e.msg}${e.fix?`<div class="vi-fix">Fix: ${e.fix}</div>`:''}</div>`);
+  });
+  d.warnings.slice(0,3).forEach(e=>{
+    vi.insertAdjacentHTML('beforeend',`<div class="vi w"><strong>[${e.id}]</strong> ${e.msg}</div>`);
+  });
+  d.infos.slice(0,2).forEach(e=>{
+    vi.insertAdjacentHTML('beforeend',`<div class="vi i">${e.msg}</div>`);
+  });
+  w.append(l,c); log.appendChild(w); log.scrollTop=log.scrollHeight;
+}
+
+// ── Busy state ──
+function setBusy(b){
+  busy=b;
+  $('sendBtn').disabled=b;
+  $('analyzeBtn').disabled=b;
+  $('sendBtn').innerHTML=b?'עובד <span class="spn"></span>':(mode==='design'?'שלח ↵':'הרץ ↵');
+  sdot.className='sdot'+(b?' busy':'');
+}
+
+function setProgress(s,t,lbl){
+  if(!s&&!t){$('progWrap').classList.remove('on');setBusy(false);return;}
+  $('progWrap').classList.add('on');
+  $('progFill').style.width=(t>0?Math.round(s/t*100):50)+'%';
+  $('progLbl').textContent=lbl||'מחשב...';
+  setBusy(true);
+}
+
+// ── Mode ──
+const MODE_ACTIONS = {
+  design: 'send_message',
+  query: 'query_model',
+  edit: 'edit_model',
+  params: 'manage_params',
+  mfg: 'mfg_analysis',
+  repair: null,
+};
+const MODE_PLACEHOLDERS = {
+  design: 'תאר חלק מכני — לדוגמה: בית מיסב OD 80מ"מ, קוטר פנימי 40מ"מ, גובה 25מ"מ...',
+  query: 'שאל על המודל — "כמה גופים יש?" / "מה הנפח?" / "רשום את הפיצ\'רים"',
+  edit: 'תאר שינוי — "הוסף fillet 3mm לכל הקצוות" / "צור shell 2mm" / "שנה WallThickness ל-3mm"',
+  params: '"צור פרמטר WallThickness = 2.5mm" / "שנה height ל-50mm" / "רשום כל הפרמטרים"',
+  mfg: '"בדוק ל-CNC 3 ציר" / "האם מתאים להדפסת 3D?" / "בעיות sheet metal?"',
+  repair: '',
+};
+const MODE_EXAMPLES = {
+  query: ['כמה גופים יש?', 'מה הנפח?', 'רשום פיצ\'רים', 'מה הפרמטרים?', 'הסבר את המודל'],
+  edit: ['הוסף fillet 2mm', 'הוסף shell 2mm', 'שנה diameter ל-30mm'],
+  params: ['רשום פרמטרים', 'צור WallThickness=2.5mm', 'שנה height ל-50mm'],
+  mfg: ['בדוק ל-CNC', 'מתאים ל-3D הדפסה?', 'ניתוח sheet metal'],
+};
+function runDirectCode(){
+  const code = document.getElementById('codeInput').value.trim();
+  if(!code){ showToast('הדבק קוד תחילה'); return; }
+  setBusy(true);
+  addMsg('system','מריץ קוד ישיר...');
+  adsk.fusionSendData('run_direct_code', JSON.stringify({code: code}));
+}
+
+function setMode(m){
+  mode=m;
+  // Show/hide direct code area
+  const ca = document.getElementById('codeArea');
+  if(ca) ca.style.display = m==='code' ? 'flex' : 'none';
+  const inputRow = document.getElementById('inputRow');
+  if(inputRow) inputRow.style.display = m==='code' || m==='repair' ? 'none' : '';
+  ['Design','Query','Edit','Params','Mfg','Repair','Code'].forEach(x=>{
+    const btn=document.getElementById('mode'+x);
+    if(btn){
+      const active=m===x.toLowerCase();
+      btn.style.background=active?'var(--accent)':'var(--s3)';
+      btn.style.color=active?'#fff':'var(--t1)';
+    }
+  });
+  // Show/hide design-specific options
+  const designOpts=document.getElementById('designOpts');
+  if(designOpts) designOpts.style.display=m==='design'?'':'none';
+  // Show/hide image repair area
+  const repairArea=document.getElementById('repairArea');
+  if(repairArea) repairArea.style.display=m==='repair'?'':'none';
+  // Placeholder
+  const box=document.getElementById('inputBox');
+  if(box&&MODE_PLACEHOLDERS[m]) box.placeholder=MODE_PLACEHOLDERS[m];
+  // Send button label
+  const sendBtn=document.getElementById('sendBtn');
+  if(sendBtn) sendBtn.textContent=m==='design'?'שלח ↵':'הרץ ↵';
+  // Mode examples
+  const exDiv=document.getElementById('modeExamples');
+  if(exDiv){
+    const exs=MODE_EXAMPLES[m]||[];
+    if(exs.length){
+      exDiv.style.display='flex';
+      exDiv.innerHTML=exs.map(e=>{
+        if(e==='הסבר את המודל'){
+          return `<button onclick="explainTimeline()" style="background:rgba(61,186,122,.15);color:#3dba7a;border:1px solid #3dba7a;border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">${e}</button>`;
+        }
+        return `<button onclick="ex('${e.replace(/'/g,"\\'")}');setMode('${m}')" style="background:var(--s3);color:var(--t2);border:1px solid var(--b1);border-radius:var(--r);padding:3px 8px;font-size:10px;cursor:pointer">${e}</button>`;
+      }).join('');
+    }else{
+      exDiv.style.display='none';
+      exDiv.innerHTML='';
+    }
+  }
+}
+
+// ── Provider ──
+const ALL_PROVS=['claude','ollama'];
+function setProvider(p){
+  provider=p;
+  ALL_PROVS.forEach(x=>{
+    $('p'+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle('active',x===p);
+    $('sett'+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle('hidden',x!==p);
+  });
+  // Only Ollama disables advanced modes
+  const freeLocal=p==='ollama';
+  ['model_gdt','full'].forEach(m=>{
+    const el=document.querySelector(`.pill[data-mode="${m}"]`);
+    if(el) el.classList.toggle('disabled',freeLocal);
+  });
+  if(freeLocal) pickModeVal('model');
+  adsk.fusionSendData('set_provider',JSON.stringify({provider:p}));
+}
+
+function saveKey(){
+  const k=$('apiKey').value.trim();
+  adsk.fusionSendData('set_api_key',JSON.stringify({key:k}));
+}
+function testKey(){
+  const k=$('apiKey').value.trim();
+  if(!k){showToast('הכנס API key תחילה');return;}
+  $('testBtn').disabled=true;
+  $('testBtn').textContent='...';
+  adsk.fusionSendData('test_api_key',JSON.stringify({key:k}));
+}
+function setKeyStatus(ok,msg){
+  const s=$('keyStatus'),t=$('keyStatusText');
+  s.style.display='flex';
+  t.className=ok?'ks-ok':'ks-err';
+  t.textContent=msg;
+  $('testBtn').disabled=false;
+  $('testBtn').textContent='בדוק';
+}
+function keyChanged(){
+  $('keyStatus').style.display='none';
+}
+function setOllamaModel(){
+  adsk.fusionSendData('set_ollama_model',JSON.stringify({model:$('ollamaModel').value}));
+}
+// ── Groq ──
+function saveGroqKey(){
+  const k=$('groqKey').value.trim();
+  adsk.fusionSendData('set_groq_key',JSON.stringify({key:k}));
+}
+function testGroqKey(){
+  const k=$('groqKey').value.trim();
+  adsk.fusionSendData('test_groq_key',JSON.stringify({key:k}));
+}
+function setGroqStatus(ok,msg){
+  const s=$('groqStatus'),t=$('groqStatusText');
+  s.style.display='flex'; t.className=ok?'ks-ok':'ks-err'; t.textContent=msg;
+}
+
+// ── Gemini ──
+function saveGeminiKey(){
+  const k=$('geminiKey').value.trim();
+  adsk.fusionSendData('set_gemini_key',JSON.stringify({key:k}));
+}
+function testGeminiKey(){
+  const k=$('geminiKey').value.trim();
+  adsk.fusionSendData('test_gemini_key',JSON.stringify({key:k}));
+}
+function setGeminiStatus(ok,msg){
+  const s=$('geminiStatus'),t=$('geminiStatusText');
+  s.style.display='flex'; t.className=ok?'ks-ok':'ks-err'; t.textContent=msg;
+}
+
+function detectOllama(){
+  $('ollamaStatusText').textContent='מחפש...';
+  adsk.fusionSendData('get_ollama_models','{}');
+}
+function populateOllamaModels(models){
+  const sel=$('ollamaModel');
+  const cur=sel.value;
+  sel.innerHTML='';
+  models.forEach(m=>{
+    const o=document.createElement('option');
+    o.value=m; o.textContent=m;
+    if(m===cur||m.includes('qwen2.5-coder')) o.selected=true;
+    sel.appendChild(o);
+  });
+  $('ollamaStatusText').textContent=`✓ ${models.length} מודלים זמינים`;
+  $('ollamaStatusText').style.color='var(--green)';
+  setOllamaModel();
+}
+
+// ── Output mode pills ──
+function pickMode(el){
+  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  outputMode=el.dataset.mode;
+}
+function pickModeVal(m){
+  document.querySelectorAll('.pill').forEach(p=>{
+    p.classList.toggle('active',p.dataset.mode===m);
+  });
+  outputMode=m;
+}
+
+// ── Material props ──
+function showMatProps(){
+  const mat=$('material').value;
+  const p=MATPROPS[mat];
+  const card=$('matCard');
+  if(!p){card.classList.remove('on');return;}
+  card.innerHTML=`<div class="mat-grid">
+    <div class="mat-prop"><div class="val">${p.E}<span style="font-size:10px">GPa</span></div><div class="lbl">מודול יאנג</div></div>
+    <div class="mat-prop"><div class="val">${p.yield}<span style="font-size:10px">MPa</span></div><div class="lbl">גבול כניעה</div></div>
+    <div class="mat-prop"><div class="val">${p.density}<span style="font-size:10px">g/cm³</span></div><div class="lbl">צפיפות</div></div>
+  </div>`;
+  card.classList.add('on');
+}
+
+// ── History ──
+function pushHistory(txt){
+  history=history.filter(h=>h!==txt);
+  history.unshift(txt);
+  if(history.length>10) history=history.slice(0,10);
+  localStorage.setItem('cadHist',JSON.stringify(history));
+  updateHistSel();
+}
+function updateHistSel(){
+  const sel=$('histSel');
+  sel.innerHTML='<option value="">-- בחר מהיסטוריה --</option>';
+  history.forEach((h,i)=>{
+    const o=document.createElement('option');
+    o.value=h; o.textContent=h.length>50?h.slice(0,47)+'...':h;
+    sel.appendChild(o);
+  });
+}
+function loadHist(){
+  const v=$('histSel').value;
+  if(v){$('inputBox').value=v;$('inputBox').focus();}
+}
+
+// ── Examples ──
+function ex(txt){$('inputBox').value=txt;$('inputBox').focus();}
+
+// ── Send design message ──
+function send(){
+  if(busy) return;
+  const txt=$('inputBox').value.trim();
+  if(!txt) return;
+  addMsg('user',txt);
+  pushHistory(txt);
+  $('inputBox').value='';
+  setBusy(true);
+
+  const payload={
+    text:txt,
+    material:$('material').value,
+    process:$('process').value,
+    detail:$('detail').value,
+    units:$('units').value,
+    output_mode:outputMode,
+    show_code:$('showCode').checked,
+    compare:$('doCompare').checked,
+  };
+
+  // Route based on mode
+  if(mode==='repair') return; // handled separately
+  if(mode==='design'){
+    if(outputMode==='assembly'){
+      adsk.fusionSendData('send_assembly',JSON.stringify(payload));
+    } else {
+      adsk.fusionSendData('send_message',JSON.stringify(payload));
+    }
+  } else {
+    const action=MODE_ACTIONS[mode];
+    if(action) adsk.fusionSendData(action,JSON.stringify(payload));
+  }
+}
+
+$('inputBox').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}
+});
+
+// ── Clear context ──
+function clearCtx(){
+  adsk.fusionSendData('clear_context','{}');
+  showToast('הקשר השיחה נוקה');
+}
+
+// ── Export ──
+function doExport(fmt){
+  showToast(`מייצא ${fmt.toUpperCase()}...`);
+  adsk.fusionSendData('export',JSON.stringify({fmt}));
+}
+function doBOM(){
+  adsk.fusionSendData('bom','{}');
+}
+function deleteLast(){
+  adsk.fusionSendData('delete_last','{}');
+}
+function doWeightOpt(){
+  adsk.fusionSendData('weight_opt',JSON.stringify({
+    material:$('material').value,
+    process:$('process').value,
+  }));
+}
+function genDrawing(){
+  const txt=$('inputBox').value.trim();
+  addMsg('system','מייצר שרטוט מכני + GD&T למודל הנוכחי...');
+  setBusy(true);
+  adsk.fusionSendData('gen_drawing',JSON.stringify({text:txt}));
+}
+function explainTimeline(){
+  addMsg('system','מסביר את ציר הזמן של המודל...');
+  setBusy(true);
+  adsk.fusionSendData('explain_timeline','{}');
+}
+function doCompare(){
+  $('doCompare').checked=true;
+  send();
+}
+
+// ── Image repair ──
+function dragOver(e){e.preventDefault();$('dropZone').classList.add('drag');}
+function dragLeave(e){$('dropZone').classList.remove('drag');}
+function dropFile(e){
+  e.preventDefault();
+  $('dropZone').classList.remove('drag');
+  const f=e.dataTransfer.files[0];
+  if(f) processImg(f);
+}
+function fileSelected(e){
+  const f=e.target.files[0];
+  if(f) processImg(f);
+}
+
+function processImg(file){
+  if(!file.type.startsWith('image/')){showToast('יש לבחור קובץ תמונה');return;}
+  if(file.size>12*1024*1024){showToast('הקובץ גדול מדי (מקס 10MB)');return;}
+
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    const img=new Image();
+    img.onload=function(){
+      const canvas=document.createElement('canvas');
+      let w=img.width,h=img.height,max=1024;
+      if(w>max||h>max){if(w>h){h=Math.round(h*max/w);w=max;}else{w=Math.round(w*max/h);h=max;}}
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=canvas.toDataURL('image/jpeg',0.88);
+      imgB64=dataUrl.split(',')[1];
+      imgType='image/jpeg';
+      const prev=$('imgPreview');
+      prev.src=dataUrl; prev.classList.add('on');
+      showToast('תמונה נטענה — לחץ לניתוח');
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function analyzeImage(){
+  if(busy) return;
+  if(!imgB64){showToast('יש לבחור תמונה תחילה');return;}
+  if(provider!=='claude'){showToast('ניתוח תמונות מצריך Claude API');return;}
+
+  addMsg('user','[ניתוח תמונה — זיהוי חלק שבור]');
+  setBusy(true);
+
+  adsk.fusionSendData('analyze_image',JSON.stringify({
+    image_b64:imgB64,
+    media_type:imgType,
+    description:$('repairDesc').value,
+    print_material:$('printMat').value,
+    show_code:$('showCode')&&$('showCode').checked,
+  }));
+}
+
+// ── Toast ──
+function showToast(msg,dur=2200){
+  const t=$('toast'); t.textContent=msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),dur);
+}
+
+// ── Fusion message handler ──
+function showPlanCard(planText){
+  // Remove existing plan card if any
+  const old=$('planCard');
+  if(old) old.remove();
+
+  const card=document.createElement('div');
+  card.id='planCard';
+  card.style.cssText=`
+    background:#1e2a1e;border:1px solid #3dba7a;border-radius:8px;
+    padding:12px 14px;margin:8px 0;direction:rtl;
+  `;
+
+  const title=document.createElement('div');
+  title.style.cssText='font-size:11px;font-weight:700;color:#3dba7a;margin-bottom:8px;letter-spacing:.5px';
+  title.textContent='תוכנית בנייה — אנא אשר לפני הביצוע';
+  card.appendChild(title);
+
+  const pre=document.createElement('pre');
+  pre.style.cssText=`
+    font-family:'Segoe UI',sans-serif;font-size:12px;color:#c8e6c8;
+    white-space:pre-wrap;word-break:break-word;line-height:1.6;margin-bottom:10px;
+  `;
+  pre.textContent=planText;
+  card.appendChild(pre);
+
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;justify-content:flex-end';
+
+  const btnCancel=document.createElement('button');
+  btnCancel.textContent='ביטול ✕';
+  btnCancel.style.cssText=`
+    padding:5px 14px;border-radius:5px;border:none;cursor:pointer;
+    background:#3a2020;color:#e05252;font-size:12px;font-weight:700;
+  `;
+  btnCancel.onclick=()=>{
+    card.remove();
+    setBusy(false);
+    try{adsk.fusionSendData('cancel_plan','{}');}catch(e){}
+  };
+
+  const btnConfirm=document.createElement('button');
+  btnConfirm.textContent='אשר ובנה ✓';
+  btnConfirm.style.cssText=`
+    padding:5px 14px;border-radius:5px;border:none;cursor:pointer;
+    background:#1a3a1a;color:#3dba7a;font-size:12px;font-weight:700;
+  `;
+  btnConfirm.onclick=()=>{
+    card.remove();
+    setBusy(true);
+    try{adsk.fusionSendData('confirm_plan','{}');}catch(e){}
+  };
+
+  btnRow.appendChild(btnCancel);
+  btnRow.appendChild(btnConfirm);
+  card.appendChild(btnRow);
+
+  // Insert before the log area
+  const log=$('log');
+  log.parentNode.insertBefore(card,log);
+  card.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+window.fusionJavaScriptHandler={
+  handle(action,data){
+    try{
+      if(action==='message'){
+        const m=JSON.parse(data);
+        if(m.type==='done'){
+          setBusy(false);
+          $('exportBar').classList.add('on');
+        }
+        if(m.type==='error') setBusy(false);
+        addMsg(m.type,m.text);
+
+      }else if(action==='progress'){
+        const p=JSON.parse(data);
+        setProgress(p.stage,p.total,p.label);
+
+      }else if(action==='validation'){
+        addValidation(JSON.parse(data));
+
+      }else if(action==='params'){
+        addParams(JSON.parse(data).rows);
+
+      }else if(action==='analysis'){
+        addAnalysis(JSON.parse(data).text);
+
+      }else if(action==='screenshot'){
+        const d=JSON.parse(data);
+        if(d.b64) addScreenshot(d.b64);
+
+      }else if(action==='key_ok'){
+        setKeyStatus(true,'✓ המפתח תקין ועובד');
+
+      }else if(action==='key_err'){
+        setKeyStatus(false,'✗ המפתח שגוי או פג תוקף');
+
+      }else if(action==='restore_config'){
+        const d=JSON.parse(data);
+        if(d.has_claude){
+          $('apiKey').value='••••••••••••••••••••';
+          setKeyStatus(true,'✓ מפתח שמור נטען');
+        }
+        if(d.has_groq){
+          $('groqKey').value='••••••••••••••••••••';
+          setGroqStatus(true,'✓ מפתח שמור נטען');
+        }
+        if(d.has_gemini){
+          $('geminiKey').value='••••••••••••••••••••';
+          setGeminiStatus(true,'✓ מפתח שמור נטען');
+        }
+        if(d.provider) setProvider(d.provider);
+        if(d.ollama_model){
+          const opt=$('ollamaModel').querySelector(`option[value="${d.ollama_model}"]`);
+          if(opt) opt.selected=true;
+        }
+
+      }else if(action==='ollama_models'){
+        const d=JSON.parse(data);
+        populateOllamaModels(d.models||[]);
+
+      }else if(action==='groq_key_ok'){
+        setGroqStatus(true,'✓ Groq key תקין ועובד');
+      }else if(action==='groq_key_err'){
+        setGroqStatus(false,'✗ Groq key שגוי');
+
+      }else if(action==='gemini_key_ok'){
+        setGeminiStatus(true,'✓ Gemini key תקין ועובד');
+      }else if(action==='gemini_key_err'){
+        setGeminiStatus(false,'✗ Gemini key שגוי');
+
+      }else if(action==='show_plan'){
+        const d=JSON.parse(data);
+        showPlanCard(d.plan);
+      }
+    }catch(e){console.error(e);}
+    return 'ok';
+  }
+};
+
+// ── Init ──
+updateHistSel();
+showMatProps();
+setTimeout(()=>{
+  try{adsk.fusionSendData('ready','{}');}catch(e){}
+},400);
+</script>
+</body>
+</html>
