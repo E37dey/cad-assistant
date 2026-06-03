@@ -1317,7 +1317,8 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                 # range below becomes range(end-1, -1, -1) and wipes the WHOLE
                 # timeline instead of just the last build.
                 if _last_timeline_mark <= 0:
-                    _exec_result = {'ok': False, 'msg': 'אין פעולה אחרונה למחיקה'}
+                    # Not an error — just nothing this session recorded to undo.
+                    _exec_result = {'ok': False, 'noop': True, 'msg': 'אין פעולה אחרונה למחיקה'}
                 else:
                     design = adsk.fusion.Design.cast(_app.activeProduct)
                     tl = design.timeline
@@ -2628,6 +2629,8 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
                     res = _fire_and_wait({'mode': 'delete_last'}, timeout=15)
                     if res.get('ok'):
                         _send('success', res.get('msg', 'נמחק'))
+                    elif res.get('noop'):
+                        _send('system', res.get('msg', ''))   # nothing to delete — neutral, not an error
                     else:
                         _send('error', res.get('msg', 'שגיאה במחיקה'))
                 threading.Thread(target=_del, daemon=True).start()
