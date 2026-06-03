@@ -728,7 +728,11 @@ def _call_groq(system, messages, max_tokens=8192):
     try:
         raw = _http_post(GROQ_API_URL, payload, headers)
         body = json.loads(raw)
-        return body['choices'][0]['message']['content']
+        choices = body.get('choices')
+        if not choices:
+            # Error payloads can arrive with HTTP 200 and no 'choices'.
+            raise RuntimeError(f'Groq returned no choices: {body.get("error", body)}')
+        return choices[0]['message']['content']
     except urllib.error.HTTPError as e:
         err = e.read().decode('utf-8', errors='replace')
         raise RuntimeError(f'Groq error {e.code}: {err[:300]}')
@@ -758,7 +762,17 @@ def _call_gemini(system, messages, max_tokens=8192):
             )
             with urllib.request.urlopen(req, timeout=120) as resp:
                 body = json.loads(resp.read().decode('utf-8'))
-            return body['candidates'][0]['content']['parts'][0]['text']
+            # A safety-blocked or truncated response has no usable parts —
+            # surface the reason instead of crashing with a KeyError.
+            candidates = body.get('candidates')
+            if not candidates:
+                reason = body.get('promptFeedback', {}).get('blockReason', 'no candidates')
+                raise RuntimeError(f'Gemini returned no output ({reason})')
+            parts = candidates[0].get('content', {}).get('parts')
+            if not parts:
+                reason = candidates[0].get('finishReason', 'no parts')
+                raise RuntimeError(f'Gemini returned no text ({reason})')
+            return parts[0].get('text', '')
         except urllib.error.HTTPError as e:
             err = e.read().decode('utf-8', errors='replace')
             if e.code == 429 and attempt < 3:
@@ -841,11 +855,14 @@ def _extract_json(text):
 # SANDBOX EXECUTOR
 # ══════════════════════════════════════════════════════════════
 
-BLOCKED_TOKENS = [
-    'os.system', 'subprocess', 'shutil.rmtree', 'eval(',
-    '__import__', 'open(', 'socket',
-    'app.quit', 'sys.exit', 'ctypes',
-]
+# Word-boundary patterns so a blocked builtin like open()/eval()/socket is
+# caught, but legitimate method calls (file.open(, reopen(, mysocket) are not
+# falsely rejected. Python is case-sensitive, so we match case-sensitively.
+_BLOCKED_PATTERNS = [re.compile(p) for p in (
+    r'\bos\.system\b', r'\bsubprocess\b', r'\bshutil\.rmtree\b',
+    r'(?<![\w.])eval\s*\(', r'\b__import__\b', r'(?<![\w.])open\s*\(',
+    r'(?<![\w.])socket\b', r'\bapp\.quit\b', r'\bsys\.exit\b', r'\bctypes\b',
+)]
 
 _ALLOWED_MODULES = {
     'adsk', 'adsk.core', 'adsk.fusion', 'adsk.cam',
@@ -855,10 +872,10 @@ _ALLOWED_MODULES = {
 
 
 def _validate_code(code):
-    low = code.lower()
-    for tok in BLOCKED_TOKENS:
-        if tok.lower() in low:
-            return False, f'Blocked: {tok}'
+    for pat in _BLOCKED_PATTERNS:
+        m = pat.search(code)
+        if m:
+            return False, f'Blocked: {m.group(0)}'
     if len(code) > 120_000:
         return False, 'Code too large'
     return True, ''
@@ -1296,18 +1313,24 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                 _exec_result = {'ok': ok, 'msg': msg, 'info': info}
 
             elif mode == 'delete_last':
-                design = adsk.fusion.Design.cast(_app.activeProduct)
-                tl = design.timeline
-                end = tl.count
-                deleted = 0
-                for i in range(end - 1, _last_timeline_mark - 1, -1):
-                    try:
-                        tl.item(i).entity.deleteMe()
-                        deleted += 1
-                    except Exception:
-                        pass
-                _last_timeline_mark = 0
-                _exec_result = {'ok': True, 'msg': f'מחק {deleted} פעולות'}
+                # Guard: mark<=0 means "no recorded build". Without this, the
+                # range below becomes range(end-1, -1, -1) and wipes the WHOLE
+                # timeline instead of just the last build.
+                if _last_timeline_mark <= 0:
+                    _exec_result = {'ok': False, 'msg': 'אין פעולה אחרונה למחיקה'}
+                else:
+                    design = adsk.fusion.Design.cast(_app.activeProduct)
+                    tl = design.timeline
+                    end = tl.count
+                    deleted = 0
+                    for i in range(end - 1, _last_timeline_mark - 1, -1):
+                        try:
+                            tl.item(i).entity.deleteMe()
+                            deleted += 1
+                        except Exception:
+                            pass
+                    _last_timeline_mark = 0
+                    _exec_result = {'ok': True, 'msg': f'מחק {deleted} פעולות'}
 
             elif mode == 'get_context':
                 ctx = _get_model_context()
@@ -1427,13 +1450,22 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
 
 
 def _fire_and_wait(payload_dict, timeout=90):
-    """Fire custom event, block thread until main thread finishes."""
+    """Fire custom event, block thread until main thread finishes.
+
+    Serialized by _exec_lock so two concurrent background threads can't both
+    reset/read the shared _exec_result / _exec_done globals and corrupt each
+    other's results. The single main thread runs the work, so serializing the
+    callers here is correct and cheap.
+    """
     global _exec_result
-    _exec_result = {}
-    _exec_done.clear()
-    _app.fireCustomEvent(EXECUTE_EVENT_ID, json.dumps(payload_dict))
-    _exec_done.wait(timeout=timeout)
-    return _exec_result
+    with _exec_lock:
+        _exec_result = {}
+        _exec_done.clear()
+        _app.fireCustomEvent(EXECUTE_EVENT_ID, json.dumps(payload_dict))
+        finished = _exec_done.wait(timeout=timeout)
+        if not finished:
+            return {'ok': False, 'msg': f'הפעולה לא הסתיימה תוך {timeout} שניות (timeout)'}
+        return _exec_result
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2226,7 +2258,7 @@ def _query_pipeline_thread(params):
     feats_count  = len(ctx.get('features', []))
     _send('system', f'מודל: {ctx.get("component_name","?")} — {bodies_count} גופים, {params_count} פרמטרים, {feats_count} פיצ\'רים')
 
-    use_api = (_provider == 'claude' and _claude_api_key)
+    use_api = (_provider != 'ollama')   # claude / groq / gemini all route via _call_ai
     user_msg = f"""Model context (JSON):
 {json.dumps(ctx, indent=2, ensure_ascii=False)[:3000]}
 
@@ -2274,7 +2306,7 @@ def _edit_pipeline_thread(params):
         _send('error', 'אין גוף פעיל לעריכה. צור מודל קודם.')
         return
 
-    use_api = (_provider == 'claude' and _claude_api_key)
+    use_api = (_provider != 'ollama')   # claude / groq / gemini all route via _call_ai
     user_msg = f"""Model context:
 {json.dumps(ctx, indent=2, ensure_ascii=False)[:2000]}
 
@@ -2324,7 +2356,7 @@ def _params_pipeline_thread(params):
         _send('error', 'תאר מה לעשות עם הפרמטרים')
         return
 
-    use_api = (_provider == 'claude' and _claude_api_key)
+    use_api = (_provider != 'ollama')   # claude / groq / gemini all route via _call_ai
     _send('system', 'מפענח בקשת פרמטר...')
 
     try:
@@ -2399,7 +2431,7 @@ def _mfg_analysis_thread(params):
         _send('error', f'אין מודל: {ctx["error"]}')
         return
 
-    use_api = (_provider == 'claude' and _claude_api_key)
+    use_api = (_provider != 'ollama')   # claude / groq / gemini all route via _call_ai
     user_msg = f"""Manufacturing process: {process}
 User question: {request if request else 'נתח את החלק עבור תהליך הייצור'}
 
@@ -2511,7 +2543,7 @@ def _explain_timeline_thread(params):
 
     _send('system', f'מסביר {len(features)} פיצ\'רים...')
 
-    use_api = (_provider == 'claude' and _claude_api_key)
+    use_api = (_provider != 'ollama')   # claude / groq / gemini all route via _call_ai
     user_msg = f"""הסבר את המודל הבא בעברית פשוטה:
 
 שם: {ctx.get('component_name', '?')}
@@ -2815,10 +2847,14 @@ def run(context):
 
 def stop(context):
     global _palette, _execute_event
-    try:
-        if _palette:
-            _palette.deleteMe()
-            _palette = None
+    # UI cleanup — guarded, because run() may have failed before _ui was set.
+    if _ui:
+        try:
+            if _palette:
+                _palette.deleteMe()
+        except Exception:
+            pass
+        _palette = None
         for i in range(_ui.allToolbarPanels.count):
             try:
                 ctrl = _ui.allToolbarPanels.item(i).controls.itemById('cadAssistantCmd')
@@ -2826,11 +2862,19 @@ def stop(context):
                     ctrl.deleteMe()
             except Exception:
                 pass
-        cmd_def = _ui.commandDefinitions.itemById('cadAssistantCmd')
-        if cmd_def:
-            cmd_def.deleteMe()
+        try:
+            cmd_def = _ui.commandDefinitions.itemById('cadAssistantCmd')
+            if cmd_def:
+                cmd_def.deleteMe()
+        except Exception:
+            pass
+
+    # Always unregister the custom event, even if the UI cleanup above failed —
+    # otherwise the event leaks and double-fires on the next reload.
+    try:
         if _execute_event:
             _app.unregisterCustomEvent(EXECUTE_EVENT_ID)
-            _execute_event = None
     except Exception:
         pass
+    _execute_event = None
+    _handlers.clear()
