@@ -45,7 +45,7 @@ _confirm_result = False
 
 OLLAMA_URL     = 'http://localhost:11434/api/generate'
 CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages'
-CLAUDE_MODEL   = 'claude-sonnet-4-6'
+CLAUDE_MODEL   = 'claude-opus-4-8'   # strongest model — best at complex CAD code, fewer retries
 CLAUDE_PING    = 'claude-haiku-4-5-20251001'
 
 GROQ_API_URL   = 'https://api.groq.com/openai/v1/chat/completions'
@@ -932,7 +932,7 @@ def _lint_build_code(code: str) -> list:
         (r'\b(rootComp|comp|root|component)\.name\s*=', "Component .name cannot be changed (rootComp/comp/root.name=) — remove that line"),
         (r'addNewComponent',    "addNewComponent crashes in Part documents — use comp=rootComp directly"),
         (r'ObjectCollection',   "ObjectCollection is not needed — select profiles directly via .profiles.item()"),
-        (r'ThreadFeatureInput|ThreadFeatureInputParameters', "ThreadFeatureInputParameters doesn't exist — use comp.features.threadFeatures.createInput(face, True) instead"),
+        (r'ThreadFeatureInputParameters', "ThreadFeatureInputParameters doesn't exist — use comp.features.threadFeatures.createInput(face, True). (threadFeatures + ThreadFeatureInput ARE valid.)"),
         (r'config\[',            "Do NOT read from config[] — config is always {}. Define all dimensions as local variables or userParameters directly in build()"),
         (r'ThroughAllExtentDefinition.*Cut|CutFeatureOperation.*ThroughAll', "ThroughAll cuts fail if direction is wrong — use setDistanceExtent with large negative value instead"),
         (r'(?<!sketchCurves)\.sketchLines\b', "sketch.sketchLines is WRONG — must be sketch.sketchCurves.sketchLines (will auto-fix)"),
@@ -1669,8 +1669,10 @@ Return ONLY the `def build(rootComp, config):` function."""
     if use_api:
         _conversation.append({'role': 'assistant', 'content': response})
 
-    # Pre-execution lint — catch obvious issues before Fusion even tries
-    lint_issues = _lint_build_code(code)
+    # Pre-execution lint — catch obvious issues before Fusion even tries.
+    # Lint the SANITIZED code (the same transform execution applies) so issues
+    # the sanitizer already auto-fixes don't waste a full AI fix-call.
+    lint_issues = _lint_build_code(_sanitize_build_code(code))
     if lint_issues:
         _send('system', f'בעיות נמצאו לפני ביצוע — מתקן אוטומטית...')
         fix_prompt = f"""This Fusion 360 build() has problems:
@@ -1724,16 +1726,18 @@ Broken code:
 {current_code[:2000]}
 ```
 
-Fix ALL errors. Rules:
-- isComputeDeferred=False BEFORE .profiles
+Fix ONLY what caused the error. KEEP every requested feature (holes, keyways,
+threads, patterns, fillets) — do NOT simplify the part to avoid the error.
+Correct-API reminders:
+- isComputeDeferred=False BEFORE reading .profiles
 - ALL dims in CM (mm÷10)
-- No profile.union() — draw ring as 2 concentric circles in 1 sketch
-- No sketchPolygon — use sk.sketchCurves.sketchLines.addByTwoPoints
+- A ring/annulus = 2 concentric circles in ONE sketch (profile.union() doesn't exist)
+- Polygons via sk.sketchCurves.sketchLines.addByTwoPoints (no sketchPolygon)
 - Parameter names: ASCII letters/digits/underscore only
-- No ThreadFeatureInputParameters/threadFeatures — use plain cylinder for thread shaft
-- No config['...'] — config is always {{}}, define all dims as local variables
+- Real threads: comp.features.threadFeatures.createInput(face, True) (NOT ThreadFeatureInputParameters)
+- config is always {{}} — define all dims as local variables, never config['...']
 
-Rewrite the COMPLETE def build() function."""
+Rewrite the COMPLETE def build() function, keeping the original design intent."""
 
             try:
                 if use_api:
