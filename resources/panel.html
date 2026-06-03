@@ -815,6 +815,8 @@ $('inputBox').addEventListener('keydown',e=>{
 // ── Clear context ──
 function clearCtx(){
   adsk.fusionSendData('clear_context','{}');
+  setBusy(false);   // escape hatch: always return the UI to ready
+  $('progWrap').classList.remove('on');
   showToast('הקשר השיחה נוקה');
 }
 

@@ -1522,6 +1522,10 @@ def _pipeline_thread(params):
         _pipeline_thread_inner(params)
     except Exception:
         _send('error', f'Pipeline crash:\n{traceback.format_exc()}')
+    finally:
+        # ALWAYS clear the busy state, regardless of which path the pipeline
+        # took. Some early returns only send a 'system' message, which does NOT
+        # reset the UI — without this the Send button stays disabled forever.
         _send_progress(0, 0)
 
 
