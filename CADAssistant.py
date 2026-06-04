@@ -1525,6 +1525,43 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                 ok, msg = _execute_drawing(payload['code'], _app, payload.get('gdt_data'))
                 _exec_result = {'ok': ok, 'msg': msg}
 
+            elif mode == 'assembly_live':
+                # Live assembly: real components + joints. Run WITHOUT the
+                # addNewComponent-stripping sanitizer (joints need real
+                # components) but still safety-validate the generated code.
+                code = payload.get('code', '')
+                ok_v, reason = _validate_code(code)
+                if not ok_v:
+                    _exec_result = {'ok': False, 'msg': reason}
+                else:
+                    design = adsk.fusion.Design.cast(_app.activeProduct)
+                    if not design:
+                        _exec_result = {'ok': False, 'msg': 'אין עיצוב פעיל'}
+                    else:
+                        rootComp = design.rootComponent
+                        ns = _make_namespace()
+                        ns['adsk'] = adsk
+                        ns['app']  = _app
+                        ns['design'] = design
+                        ns['rootComp'] = rootComp
+                        ns['__builtins__']['adsk'] = adsk
+                        try:
+                            exec(compile(code, '<assembly_live>', 'exec'), ns)
+                            fn = ns.get('build_assembly')
+                            if not callable(fn):
+                                _exec_result = {'ok': False, 'msg': 'No build_assembly() found'}
+                            else:
+                                fn(rootComp)
+                                adsk.doEvents()
+                                nj = 0
+                                try:
+                                    nj = rootComp.joints.count + rootComp.asBuiltJoints.count
+                                except Exception:
+                                    pass
+                                _exec_result = {'ok': True, 'joints': nj}
+                        except Exception as e:
+                            _exec_result = {'ok': False, 'msg': f'{e}'}
+
             elif mode == 'export':
                 ok, msg = _do_export(payload.get('fmt', 'step'))
                 _exec_result = {'ok': ok, 'msg': msg}
@@ -2372,6 +2409,120 @@ For a nut, do the same on the inner cylindrical face with isInternal=True.
 7. Add user parameters for key dimensions; name each function clearly"""
 
 
+ASSEMBLY_JOINTS_SYSTEM_PROMPT = r"""You are an expert Fusion 360 Python API programmer. Create a LIVING assembly:
+real components connected by JOINTS so the mechanism actually MOVES in Fusion.
+
+OUTPUT — return ONE function:
+```python
+def build_assembly(rootComp):
+    import adsk.core, adsk.fusion, math
+    # 1) create each part as a REAL component (keep the occurrence reference)
+    # 2) build its geometry INSIDE that component, at its real assembled position
+    # 3) connect moving parts with as-built joints (revolute = rotates)
+    return {"components": [...], "joints": [...]}
+```
+
+## REAL COMPONENTS (required for joints)
+```python
+occ1 = rootComp.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+comp1 = occ1.component
+comp1.name = 'Leaf1'
+# build all of Leaf1's sketches/extrudes INSIDE comp1 (NOT rootComp), positioned
+# at the part's real location along the shared axis.
+```
+Keep EVERY occurrence reference (occ1, occ2, occ_pin ...) — you need them for joints.
+
+## JOINTS — THE MOTION (as-built: joins parts where they were built)
+For a hinge / coupling / shaft that ROTATES, add a revolute joint about the
+pin/shaft axis. ALWAYS wrap joints in try/except so a joint failure still leaves
+a valid static assembly:
+```python
+try:
+    cpi = rootComp.constructionPoints.createInput()
+    cpi.setByPoint(adsk.core.Point3D.create(AX, AY, AZ))   # a point ON the rotation axis (cm)
+    axis_pt = rootComp.constructionPoints.add(cpi)
+    geo = adsk.fusion.JointGeometry.createByPoint(axis_pt)
+    ab  = rootComp.asBuiltJoints
+    jin = ab.createInput(occ_moving, occ_fixed, geo)        # first arg is the part that moves
+    jin.setAsRevoluteJointMotion(adsk.fusion.JointDirections.XAxisJointDirection)  # axis dir
+    ab.add(jin)
+except Exception:
+    pass   # static assembly is an acceptable fallback — never fail the build over a joint
+```
+Pick the JointDirection (XAxis/YAxis/ZAxis) to MATCH the real rotation axis (the
+pin/shaft direction). Hinge pin along X -> XAxisJointDirection. Shaft along Z -> ZAxis.
+
+## RULES
+1. ALL dimensions in CENTIMETERS (1mm = 0.1cm)
+2. Build each part inside its OWN component, positioned to mate concentrically
+3. Only joint parts that truly move relative to each other (e.g. two hinge leaves
+   about the pin; coupling hubs about the shaft axis)
+4. Wrap EVERY joint in try/except — never fail the build over a joint
+5. Do NOT redefine adsk/app; they are provided. No documents.add(), no ui.messageBox()."""
+
+
+def _live_assembly_pipeline_thread(params):
+    """Build a LIVING assembly: real components + joints (it moves in Fusion)."""
+    prompt = params.get('text', '')
+    if not prompt:
+        _send('error', 'תאר את ההרכבה')
+        _send_progress(0, 0)
+        return
+
+    prompt = _maybe_expand(prompt, params)
+    full = f"""Create a LIVING (jointed, movable) Fusion 360 assembly for:
+{prompt}
+
+Material: {params.get('material', 'Steel')}
+Connect the parts that should move with joints (revolute for rotation)."""
+
+    _send('system', '[1/2] AI מייצר הרכבה חיה עם joints...')
+    _send_progress(1, 2, 'Generating live assembly...')
+    try:
+        resp = _call_claude(ASSEMBLY_JOINTS_SYSTEM_PROMPT, [{'role': 'user', 'content': full}])
+    except Exception as e:
+        _send('error', f'AI error: {e}')
+        _send_progress(0, 0)
+        return
+
+    code = _extract_python(resp, 'def build_assembly(')
+    if not code or 'def build_assembly(' not in code:
+        _send('error', 'AI לא החזיר build_assembly(). נסה שוב.')
+        _send_progress(0, 0)
+        return
+    if params.get('show_code'):
+        _send('code', code[:2000] + ('...' if len(code) > 2000 else ''))
+
+    _send('system', '[2/2] בונה הרכבה חיה ב-Fusion...')
+    _send_progress(2, 2, 'Building live assembly...')
+    res = _fire_and_wait({'mode': 'assembly_live', 'code': code}, timeout=120)
+
+    if not res.get('ok'):
+        # one retry with the error fed back
+        _send('system', 'נכשל — מנסה לתקן...')
+        try:
+            fix = _call_claude(ASSEMBLY_JOINTS_SYSTEM_PROMPT, [
+                {'role': 'user', 'content': full},
+                {'role': 'assistant', 'content': resp},
+                {'role': 'user', 'content': f"FAILED:\n{res.get('msg','')[:600]}\nFix and return the complete def build_assembly(rootComp)."},
+            ])
+            fix_code = _extract_python(fix, 'def build_assembly(')
+            if fix_code:
+                res = _fire_and_wait({'mode': 'assembly_live', 'code': fix_code}, timeout=120)
+        except Exception:
+            pass
+
+    if res.get('ok'):
+        shot = _fire_and_wait({'mode': 'screenshot'}, timeout=10)
+        if shot.get('ok') and shot.get('b64') and _palette:
+            _palette.sendInfoToHTML('screenshot', json.dumps({'b64': shot['b64']}))
+        nj = res.get('joints', 0)
+        _send('done', f'🎬 הרכבה חיה מוכנה! ({nj} joints) — גרור חלק ב-Fusion כדי לראות אותו זז.')
+    else:
+        _send('error', f'הרכבה חיה נכשלה: {res.get("msg", "")[:400]}')
+    _send_progress(0, 0)
+
+
 def _assembly_pipeline_thread(params):
     """Build a multi-component assembly."""
     global _last_code, _last_params
@@ -3013,7 +3164,9 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
                 if not _claude_api_key:
                     _send('error', 'מצב הרכבה מצריך Claude API.')
                     return
-                t = threading.Thread(target=_assembly_pipeline_thread, args=(data,), daemon=True)
+                # 'live' → jointed/movable assembly; otherwise static multi-part.
+                target = _live_assembly_pipeline_thread if data.get('live') else _assembly_pipeline_thread
+                t = threading.Thread(target=target, args=(data,), daemon=True)
                 t.start()
 
             elif action == 'test_api_key':

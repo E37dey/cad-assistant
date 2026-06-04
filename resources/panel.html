@@ -479,6 +479,7 @@ textarea::placeholder{color:var(--t3)}
       <label class="ctoggle"><input type="checkbox" id="showCode"> קוד</label>
       <label class="comp-toggle"><input type="checkbox" id="doCompare"> השוואה</label>
       <label class="ctoggle" title="הרחב בקשה קצרה לספסיפיקציה הנדסית מלאה לפני הבנייה"><input type="checkbox" id="autoDetail"> פירוט אוטו'</label>
+      <label class="ctoggle" title="במצב הרכבה: בנה הרכבה חיה עם joints שזזה ב-Fusion (revolute וכו')"><input type="checkbox" id="jointsLive"> 🎬 חי</label>
     </div>
     <button class="send-btn" id="sendBtn" onclick="send()">שלח ↵</button>
   </div>
@@ -829,6 +830,7 @@ function send(){
     show_code:$('showCode').checked,
     compare:$('doCompare').checked,
     auto_detail:$('autoDetail') && $('autoDetail').checked,
+    live:$('jointsLive') && $('jointsLive').checked,
   };
 
   // Route based on mode
