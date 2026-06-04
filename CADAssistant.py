@@ -615,6 +615,21 @@ def build(rootComp, config):
 Be conservative with dimensions — slightly stronger is better than too weak.
 If you cannot determine a dimension, state your assumption clearly."""
 
+EXPAND_SYSTEM_PROMPT = """You are a senior mechanical design engineer. The user gives a SHORT part or assembly request. Expand it into a concise but COMPLETE, buildable engineering specification that another engineer could model directly with no further questions.
+
+Include, where relevant:
+- All key dimensions in mm (choose sensible standard values for anything the user left out)
+- Wall thicknesses, clearances/fits (e.g. 0.1-0.2 mm), fillet and chamfer radii
+- Feature detail: holes (diameter, count, spacing, counterbore/countersink), keyways, threads, patterns
+- For assemblies: list each component, its dimensions, how the parts mate, and their positions along a shared axis
+- Material if implied by the use
+
+Rules:
+- KEEP every explicit value the user gave; only ADD missing detail, never contradict them.
+- Be specific and numeric. No prose padding, no questions, no preamble.
+- Output ONLY the specification as a bulleted list, in the SAME language the user used."""
+
+
 WEIGHT_OPT_PROMPT = """You are a mechanical engineer specializing in lightweight design.
 Given a part's parameters and material, suggest specific changes to reduce weight while maintaining structural integrity.
 Focus on: adding pockets/lightening holes, shell operations, rib reinforcement instead of solid walls.
@@ -1608,6 +1623,24 @@ def _interpret_and_confirm(prompt):
     return True
 
 
+def _maybe_expand(prompt, params):
+    """If 'auto_detail' is on, expand a short request into a full engineering
+    spec (more detail → better, more accurate models) and show it. Returns the
+    expanded prompt, or the original on failure / when disabled / on Ollama."""
+    if not params.get('auto_detail') or _provider == 'ollama':
+        return prompt
+    _send('system', '📝 מפרט את הבקשה לספסיפיקציה הנדסית מלאה...')
+    try:
+        spec = _call_ai(EXPAND_SYSTEM_PROMPT, [{'role': 'user', 'content': prompt}], max_tokens=1024)
+        spec = (spec or '').strip()
+        if len(spec) > len(prompt):
+            _send('code', spec)   # show the expanded spec to the user
+            return spec
+    except Exception as e:
+        _send('system', f'פירוט אוטומטי דולג: {e}')
+    return prompt
+
+
 def _verify_and_correct(request, code):
     """Measure the just-built part and, if a requested dimension drifted beyond
     ~0.5 mm, delete it and rebuild a corrected version ONCE. Returns the final
@@ -1713,6 +1746,8 @@ def _pipeline_thread_inner(params):
         _last_params  = {}
         _send('system', 'Context cleared — starting fresh.')
 
+    # Auto-detail: expand a short request into a full engineering spec first.
+    prompt = _maybe_expand(prompt, params)
 
     full_prompt = f"""{prompt}
 
@@ -2346,6 +2381,9 @@ def _assembly_pipeline_thread(params):
     process  = params.get('process', 'CNC Machining')
     units    = params.get('units', 'mm')
     show_code = params.get('show_code', False)
+
+    # Auto-detail: expand a short assembly request into a full engineering spec.
+    prompt = _maybe_expand(prompt, params)
 
     full_prompt = f"""Create a Fusion 360 ASSEMBLY for:
 
