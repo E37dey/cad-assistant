@@ -631,19 +631,18 @@ RESET_KEYWORDS   = ['חדש', 'new', 'התחל', 'start', 'reset', 'חלק חד�
 # AI CALLS
 # ══════════════════════════════════════════════════════════════
 
-def _call_claude(system, messages, max_tokens=8192, temperature=0.0):
+def _call_claude(system, messages, max_tokens=8192):
     """Call Claude API with multi-turn messages list.
 
-    temperature=0 → deterministic, consistent code (was defaulting to 1.0,
-    which made the same request produce different/imprecise geometry each time).
-    The system prompt is sent as a cache_control block so repeated calls
-    (retries, successive builds) reuse it instead of re-processing it — faster
-    and cheaper.
+    NOTE: Opus 4.8 DEPRECATED the `temperature` parameter and rejects it with a
+    400 error — so we do not send it (the model handles sampling internally and
+    is effectively deterministic for code). The system prompt is sent as a
+    cache_control block so repeated calls (retries, successive builds) reuse it
+    instead of re-processing it — faster and cheaper.
     """
     payload = json.dumps({
         'model': CLAUDE_MODEL,
         'max_tokens': max_tokens,
-        'temperature': temperature,
         'system': [{'type': 'text', 'text': system,
                     'cache_control': {'type': 'ephemeral'}}],
         'messages': messages,
