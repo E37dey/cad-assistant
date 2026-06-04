@@ -876,6 +876,8 @@ _ALLOWED_MODULES = {
     'adsk', 'adsk.core', 'adsk.fusion', 'adsk.cam',
     'adsk.drawing', 'math', 'collections', 'json', 're',
     'itertools', 'functools',
+    # Safe, read-only — drawings use these for the title-block date.
+    'datetime', 'time',
 }
 
 
