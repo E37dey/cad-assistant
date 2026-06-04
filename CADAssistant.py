@@ -2264,24 +2264,45 @@ Create multi-component assemblies from natural language descriptions.
 
 OUTPUT FORMAT — return MULTIPLE named functions, one per component:
 ```python
-# COMPONENT: ComponentName
-def build_componentname(rootComp, config):
+# COMPONENT: Bolt
+def build_bolt(rootComp, config):
     import adsk.core, adsk.fusion, math
-    occ = rootComp.occurrences.addNewComponent(adsk.core.Matrix3D.create())
-    comp = occ.component
-    comp.name = 'ComponentName'
-    # ... build the component ...
+    comp = rootComp        # all parts share the root component
+    # build the part AT ITS REAL ASSEMBLED POSITION (see POSITIONING below)
     return {"bodies": [], "params": {}}
 ```
 
-RULES:
+## POSITIONING — THE MOST IMPORTANT RULE (read carefully)
+All parts live in ONE shared coordinate space (rootComp). You CANNOT position
+parts with component transforms / Matrix3D — they are ignored. Position each
+part by drawing its geometry at the correct ABSOLUTE coordinates.
+
+- Choose a shared assembly axis (use Z). Lay every part out along it at its real
+  mating location so the parts actually fit together — NOT stacked at the origin.
+- To place a sketch at a given Z, create an offset construction plane:
+  `pl_in = comp.constructionPlanes.createInput()
+   pl_in.setByOffset(comp.xYConstructionPlane, adsk.core.ValueInput.createByReal(Z_cm))
+   plane = comp.constructionPlanes.add(pl_in)
+   sketch = comp.sketches.add(plane)`
+  then extrude from there. Or extrude from XY with the correct start/extent.
+
+## EXAMPLE LAYOUT — bolt + washer + nut along Z (all cm)
+Let shaft_len, head_h, washer_t, nut_h be the dimensions.
+- build_bolt:   hex head from z=-head_h to z=0; shaft (cylinder Ø=bolt_dia)
+                from z=0 to z=+shaft_len.
+- build_washer: flat ring (Ø_out, Ø_in=bolt_dia+clearance) seated just under the
+                head, from z=0 to z=+washer_t (or up near the nut end).
+- build_nut:    hex prism with a Ø=bolt_dia hole, threaded onto the FAR end:
+                from z=shaft_len-nut_h to z=shaft_len.
+This way the parts are concentric on the Z axis and stacked in their real order.
+
+## RULES
 1. ALL dimensions in CENTIMETERS (1mm = 0.1cm)
 2. Each component is a separate function named `build_<lowercase_name>`
-3. Position components correctly relative to each other using Matrix3D transforms
+3. comp = rootComp — do NOT use addNewComponent (it is stripped). Position by geometry.
 4. Use sketch.isComputeDeferred = True/False correctly
-5. Add user parameters for key dimensions
-6. Components must fit together — account for clearances (typically 0.1-0.2mm)
-7. Name each function clearly (build_bolt, build_nut, build_bracket, etc.)"""
+5. Parts must mate concentrically on the shared axis; add 0.1-0.2mm clearances
+6. Add user parameters for key dimensions; name each function clearly"""
 
 
 def _assembly_pipeline_thread(params):
