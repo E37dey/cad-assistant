@@ -1088,12 +1088,27 @@ def _get_model_context() -> dict:
             except Exception:
                 features.append({'index': i, 'name': f'item_{i}', 'type': 'unknown'})
 
+        # Overall bounding-box dimensions in MM — the key measurement for
+        # verifying the built part against the requested dimensions.
+        bbox_mm = None
+        try:
+            bb = rootComp.boundingBox
+            if bb:
+                bbox_mm = {
+                    'x': round((bb.maxPoint.x - bb.minPoint.x) * 10, 2),
+                    'y': round((bb.maxPoint.y - bb.minPoint.y) * 10, 2),
+                    'z': round((bb.maxPoint.z - bb.minPoint.z) * 10, 2),
+                }
+        except Exception:
+            bbox_mm = None
+
         return {
             'component_name': rootComp.name,
             'body_count': rootComp.bRepBodies.count,
             'bodies': bodies,
             'parameters': params,
             'features': features,
+            'bbox_mm': bbox_mm,
         }
     except Exception as e:
         return {'error': str(e)}
@@ -1356,6 +1371,21 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                     _last_timeline_mark = 0
                     _exec_result = {'ok': True, 'msg': f'מחק {deleted} פעולות'}
 
+            elif mode == 'clear_since':
+                # Internal: delete timeline items from an EXPLICIT mark to the end.
+                # Used by the verification loop to remove the original build before
+                # rebuilding a corrected one. No mark<=0 guard (unlike delete_last)
+                # because the caller passes the exact mark it captured.
+                mark = int(payload.get('mark', 0))
+                design = adsk.fusion.Design.cast(_app.activeProduct)
+                tl = design.timeline
+                for i in range(tl.count - 1, mark - 1, -1):
+                    try:
+                        tl.item(i).entity.deleteMe()
+                    except Exception:
+                        pass
+                _exec_result = {'ok': True}
+
             elif mode == 'clear_model':
                 # Delete EVERYTHING in the active design. Unlike delete_last this
                 # is session-independent — it removes a model built any time,
@@ -1578,6 +1608,72 @@ def _interpret_and_confirm(prompt):
     return True
 
 
+def _verify_and_correct(request, code):
+    """Measure the just-built part and, if a requested dimension drifted beyond
+    ~0.5 mm, delete it and rebuild a corrected version ONCE. Returns the final
+    code (corrected or original). Updates _last_code / _last_params on rebuild."""
+    global _last_code, _last_params
+    # Capture the original build's timeline mark BEFORE anything else, so we can
+    # remove exactly that build if we need to rebuild a correction.
+    orig_mark = _last_timeline_mark
+    try:
+        ctx_res = _fire_and_wait({'mode': 'get_context'}, timeout=15)
+        ctx = ctx_res.get('context', {}) if ctx_res.get('ok') else {}
+        bbox = ctx.get('bbox_mm')
+        params = ctx.get('parameters', {})
+        if not bbox and not params:
+            return code  # nothing measurable to verify against
+
+        measured = {
+            'overall_bounding_box_mm': bbox,
+            'parameters': {k: f"{v['value']} {v.get('unit', '')}".strip()
+                           for k, v in params.items()},
+        }
+        _send('system', '🔍 מאמת מידות מול הבקשה...')
+
+        verify_msg = f"""You are a CAD QC inspector. The user requested this part:
+"{request}"
+
+The model that was actually built measures:
+{json.dumps(measured, ensure_ascii=False, indent=2)}
+
+Compare the ACTUAL measurements against the dimensions the user requested.
+(bounding_box = overall envelope in mm; parameters = internal feature sizes.)
+- If every requested dimension is satisfied within 0.5 mm, reply with EXACTLY
+  this token and nothing else: VERIFIED_OK
+- Otherwise return a corrected def build(rootComp, config) that fixes ONLY the
+  out-of-spec dimensions, keeping everything else identical, with a one-line
+  comment naming what changed."""
+
+        vresp = _call_ai(MODELING_SYSTEM_PROMPT, [{'role': 'user', 'content': verify_msg}])
+
+        fixed = _extract_python(vresp, 'def build(') if 'def build(' in vresp else None
+        if not fixed:
+            _send('success', '✓ מאומת — המידות תואמות לבקשה')
+            return code
+
+        # Discrepancy found → remove the original (wrong) build, then build the fix.
+        _send('system', '⚙️ נמצאה סטייה — מתקן ובונה מחדש...')
+        _fire_and_wait({'mode': 'clear_since', 'mark': orig_mark}, timeout=15)
+        rb = _fire_and_wait({'mode': 'model', 'code': fixed})
+        if rb.get('ok'):
+            _last_code = fixed
+            info = rb.get('info', {})
+            _last_params = info.get('params', _last_params)
+            _send('success', '✓ תוקן ואומת — המידות עכשיו תואמות לבקשה')
+            if info.get('params'):
+                _send_params(info['params'])
+            return fixed
+        # Correction failed to build — the original was already removed, so
+        # rebuild the original code to avoid leaving the user with an empty doc.
+        _send('system', f'התיקון נכשל — משחזר את המודל המקורי')
+        _fire_and_wait({'mode': 'model', 'code': code})
+        return code
+    except Exception as e:
+        _send('system', f'אימות דולג: {e}')
+        return code
+
+
 def _pipeline_thread(params):
     global _conversation, _last_code, _last_params, _last_comp_name
     try:
@@ -1797,6 +1893,10 @@ Rewrite the COMPLETE def build() function, keeping the original design intent.""
     _send('success', f'Model built in {info.get("exec_time_ms", "?")}ms')
     if info.get('params'):
         _send_params(info['params'])
+
+    # ── Verification: measure the part and auto-correct dimension drift ──
+    if use_api:
+        code = _verify_and_correct(prompt, code)
 
     # Screenshot after successful build
     shot = _fire_and_wait({'mode': 'screenshot'}, timeout=10)
