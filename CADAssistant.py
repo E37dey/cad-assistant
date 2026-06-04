@@ -2517,6 +2517,7 @@ Write def modify(design, rootComp, timeline_mark) to apply this change."""
     else:
         rolled = ' (הוחזר לאחור)' if res.get('rolled_back') else ''
         _send('error', f'עריכה נכשלה{rolled}: {res.get("msg", "")}')
+    _send_progress(0, 0)   # reset busy — success path sends 'success', which doesn't unlock
 
 
 def _params_pipeline_thread(params):
@@ -2584,6 +2585,7 @@ def _params_pipeline_thread(params):
             _send('error', res.get('msg', ''))
     else:
         _send('error', f'פעולה לא מוכרת: {action_type}')
+    _send_progress(0, 0)   # reset busy — 'success'/'system' paths don't unlock the UI
 
 
 def _mfg_analysis_thread(params):
@@ -2618,6 +2620,7 @@ Provide detailed manufacturing analysis in Hebrew."""
         _send('analysis', answer)
     except Exception as e:
         _send('error', f'שגיאת AI: {e}')
+    _send_progress(0, 0)   # reset busy — 'analysis' alone doesn't unlock the UI
 
 
 _GDT_SYMBOLS = {
@@ -2745,6 +2748,7 @@ def _explain_timeline_thread(params):
 
     if not features:
         _send('system', 'ציר הזמן ריק — אין פיצ\'רים להסביר.')
+        _send_progress(0, 0)
         return
 
     _send('system', f'מסביר {len(features)} פיצ\'רים...')
@@ -2776,6 +2780,7 @@ def _explain_timeline_thread(params):
         _send('analysis', answer)
     except Exception as e:
         _send('error', f'שגיאת AI: {e}')
+    _send_progress(0, 0)   # reset busy — 'analysis' alone doesn't unlock the UI
 
 
 # ══════════════════════════════════════════════════════════════
