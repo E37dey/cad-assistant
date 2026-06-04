@@ -1183,8 +1183,18 @@ def _execute_drawing(code, app_ref, gdt_data):
     if not callable(fn):
         return False, 'No create_drawing() found'
 
+    # Pass the REAL component to draw (was None — the drawing prompt tells the
+    # model to use `component` in addBaseView(component, ...), so None broke it).
     try:
-        fn(app_ref, None, gdt_data or {})
+        design = adsk.fusion.Design.cast(app_ref.activeProduct)
+        component = design.rootComponent if design else None
+    except Exception:
+        component = None
+    if component is None:
+        return False, 'אין מודל פעיל לשרטוט'
+
+    try:
+        fn(app_ref, component, gdt_data or {})
         adsk.doEvents()
         return True, 'Drawing created'
     except Exception as e:

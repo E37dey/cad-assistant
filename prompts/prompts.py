@@ -193,6 +193,9 @@ def create_drawing(app, component, gdt_data):
     # ... your code ...
     return drawing_doc
 ```
+`component` is ALREADY PROVIDED — it is the root component of the active design
+(the part to draw). Use it directly in addBaseView(component, ...). Do NOT set it
+to None and do NOT assume it is empty; never call documents.add() for the design.
 
 ## FUSION 360 DRAWING API OVERVIEW
 Fusion 360's Drawing API (adsk.drawing module) allows:
