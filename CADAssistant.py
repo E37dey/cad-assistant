@@ -1605,7 +1605,7 @@ def _pipeline_thread_inner(params):
     use_api    = (_provider != 'ollama')   # True for claude / groq / gemini
 
     do_gdt      = use_api and output_mode in ('model_gdt', 'full')
-    do_drawing  = use_api and output_mode == 'full'
+    do_drawing  = False   # Fusion API cannot create drawings programmatically (platform limitation)
     do_validate = use_api and output_mode in ('model_gdt', 'full')
     total       = 1 + do_gdt + do_drawing + do_validate + (1 if compare else 0)
     stage       = 0
@@ -2520,36 +2520,93 @@ Provide detailed manufacturing analysis in Hebrew."""
         _send('error', f'שגיאת AI: {e}')
 
 
+_GDT_SYMBOLS = {
+    'flatness': '⏥', 'straightness': '⏤', 'circularity': '○', 'cylindricity': '⌭',
+    'parallelism': '∥', 'perpendicularity': '⊥', 'angularity': '∠', 'position': '⊕',
+    'concentricity': '◎', 'symmetry': '⌯', 'runout': '↗', 'total_runout': '↗↗',
+    'profile_line': '⌒', 'profile_surface': '⌓',
+}
+
+
+def _format_gdt_report(gdt, part_name=''):
+    """Render the GD&T JSON spec as a readable monospace report."""
+    L = [f'GD&T REPORT  —  {part_name or "Part"}', '=' * 40]
+
+    datums = gdt.get('datums', [])
+    if datums:
+        L.append(f'\nDATUMS ({len(datums)}):')
+        for d in datums:
+            L.append(f"  [{d.get('label','?')}] {d.get('feature','?')} — {d.get('description','')}")
+
+    fcs = gdt.get('feature_controls', [])
+    if fcs:
+        L.append(f'\nFEATURE CONTROL FRAMES ({len(fcs)}):')
+        for fc in fcs:
+            sym = _GDT_SYMBOLS.get(fc.get('symbol', ''), fc.get('symbol', '?'))
+            dia = '⌀' if fc.get('diameter_zone') else ''
+            mmc = ' (M)' if fc.get('mmc') else (' (L)' if fc.get('lmc') else '')
+            refs = ' | '.join(fc.get('datums', []))
+            refs = f'  [{refs}]' if refs else ''
+            L.append(f"  {sym}  {dia}{fc.get('tolerance','?')}{mmc}{refs}  →  {fc.get('feature','?')}")
+            if fc.get('description'):
+                L.append(f"        {fc['description']}")
+
+    sf = gdt.get('surface_finishes', [])
+    if sf:
+        L.append('\nSURFACE FINISH:')
+        for s in sf:
+            L.append(f"  {s.get('feature','?')}: Ra {s.get('ra_um','?')} µm  ({s.get('process','')})")
+
+    dt = gdt.get('dimensional_tolerances', [])
+    if dt:
+        L.append('\nDIMENSIONAL TOLERANCES:')
+        for t in dt:
+            fit = f" {t.get('fit','')}" if t.get('fit') else ''
+            up, lo = t.get('upper'), t.get('lower')
+            tol = f"  (+{up} / {lo})" if up is not None and lo is not None else ''
+            L.append(f"  {t.get('feature','?')}: ⌀{t.get('nominal','?')}{fit}{tol}")
+
+    gt = gdt.get('general_tolerance')
+    if gt:
+        L.append(f'\nGENERAL TOLERANCE: {gt}')
+
+    return '\n'.join(L)
+
+
 def _gdt_drawing_pipeline_thread(params):
-    """Generate GD&T + mechanical drawing for the CURRENT model in Fusion."""
+    """Produce a GD&T analysis report for the CURRENT model.
+
+    NOTE: Fusion's API CANNOT create 2D drawings programmatically — it is a
+    documented platform limitation (none of the drawing functionality is exposed
+    through the API). So this generates a GD&T specification report instead of a
+    drawing. For an actual sheet, use Fusion's native 'Drawing from Design'.
+    """
     description = params.get('text', '')
 
     _send('system', 'קורא נתוני מודל...')
     ctx_res = _fire_and_wait({'mode': 'get_context'}, timeout=15)
     if not ctx_res.get('ok'):
         _send('error', 'לא ניתן לקרוא מודל פעיל. פתח מודל קודם.')
+        _send_progress(0, 0)
         return
     ctx = ctx_res.get('context', {})
     if 'error' in ctx or ctx.get('body_count', 0) == 0:
         _send('error', 'אין גוף פעיל. צור מודל קודם.')
+        _send_progress(0, 0)
         return
 
-    bodies = ctx.get('bodies', [])
     params_dict = ctx.get('parameters', {})
-    body_names = [b['name'] for b in bodies]
+    body_names = [b['name'] for b in ctx.get('bodies', [])]
     _send('system', f'מודל: {ctx.get("component_name","?")} — גופים: {", ".join(body_names)}')
 
-    # Build context description
     ctx_text = f"""Part name: {ctx.get('component_name', 'Unknown')}
 Bodies: {json.dumps(body_names)}
 Parameters: {json.dumps({k: v['expression'] for k, v in params_dict.items()}, ensure_ascii=False)[:600]}
 Features: {json.dumps([f['type'] for f in ctx.get('features', [])[:20]])}
 {f'Additional description: {description}' if description else ''}"""
 
-    # Stage 1: GD&T
-    _send_progress(1, 2, 'מייצר GD&T...')
-    _send('system', '[1/2] מנתח גיאומטריה ל-GD&T...')
-    gdt_data = None
+    _send_progress(1, 1, 'מנתח GD&T...')
+    _send('system', 'מנתח גיאומטריה וקובע callouts של GD&T...')
     try:
         gdt_msg = f"""Determine GD&T callouts for this part:
 {ctx_text}
@@ -2558,36 +2615,15 @@ Return ONLY a JSON specification with: datums, feature_controls, surface_finishe
         gdt_resp = _simple_call(GDT_SYSTEM_PROMPT, gdt_msg)
         gdt_data = _extract_json(gdt_resp)
         if gdt_data:
+            report = _format_gdt_report(gdt_data, ctx.get('component_name', ''))
+            _send('code', report)   # monospace block keeps the columns aligned
             nd = len(gdt_data.get('datums', []))
             nc = len(gdt_data.get('feature_controls', []))
-            _send('success', f'GD&T: {nd} Datums, {nc} Feature Controls')
+            _send('success', f'דוח GD&T מוכן — {nd} datums, {nc} feature controls ✓')
         else:
-            _send('system', 'GD&T: לא ניתן לפרסר תגובה (ממשיך ללא)')
+            _send('error', 'לא ניתן לפרסר את תגובת ה-GD&T. נסה שוב.')
     except Exception as e:
-        _send('system', f'GD&T warning: {e}')
-
-    # Stage 2: Drawing
-    _send_progress(2, 2, 'מייצר שרטוט מכני...')
-    _send('system', '[2/2] יוצר שרטוט מכני ב-Fusion...')
-    try:
-        gdt_ctx = f'\nGD&T:\n{json.dumps(gdt_data, indent=2)}\n' if gdt_data else ''
-        draw_msg = f"""Create a mechanical drawing for this part:
-{ctx_text}
-{gdt_ctx}
-Include standard views, section views, dimensions, GD&T callouts, surface finish, title block.
-Return ONLY `def create_drawing(app, component, gdt_data):`"""
-        draw_resp = _simple_call(DRAWING_SYSTEM_PROMPT, draw_msg, max_tokens=8192)
-        draw_code = _extract_python(draw_resp, 'def create_drawing(')
-        if draw_code:
-            draw_res = _fire_and_wait({'mode': 'drawing', 'code': draw_code, 'gdt_data': gdt_data or {}}, timeout=30)
-            if draw_res.get('ok'):
-                _send('success', 'שרטוט מכני נוצר ✓')
-            else:
-                _send('system', f'שרטוט: {draw_res.get("msg", "")}')
-        else:
-            _send('system', 'שרטוט: AI לא החזיר קוד תקין')
-    except Exception as e:
-        _send('error', f'שגיאת שרטוט: {e}')
+        _send('error', f'שגיאת GD&T: {e}')
 
     _send_progress(0, 0)
 

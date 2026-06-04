@@ -376,7 +376,7 @@ textarea::placeholder{color:var(--t3)}
   <div class="pills" id="modePills">
     <div class="pill active" data-mode="model" onclick="pickMode(this)">מודל 3D</div>
     <div class="pill" data-mode="model_gdt" onclick="pickMode(this)">+ GD&T</div>
-    <div class="pill" data-mode="full" onclick="pickMode(this)">מלא (+ שרטוט)</div>
+    <div class="pill" data-mode="full" onclick="pickMode(this)">מלא (+ ולידציה)</div>
     <div class="pill" data-mode="assembly" onclick="pickMode(this)" style="background:rgba(155,114,232,.15);border-color:#9b72e8;color:#9b72e8">🔩 הרכבה</div>
   </div>
 </div>
@@ -400,7 +400,7 @@ textarea::placeholder{color:var(--t3)}
   <button class="btnx p" onclick="doCompare()" id="cmpBtn">🔀 השוואת וריאנטים</button>
   <button class="btnx" onclick="deleteLast()" style="background:#5a1a1a;color:#ff6b6b;border-color:#7a2a2a" title="בטל את הבנייה האחרונה של ה-session">🗑 מחק אחרון</button>
   <button class="btnx" onclick="clearModel()" style="background:#6a1414;color:#ff8080;border-color:#8a2020" title="מחק את כל הגופים במודל (ניתן לשחזר עם Ctrl+Z)">🧹 נקה מודל</button>
-  <button class="btnx" onclick="genDrawing()" style="background:#1a3a5a;color:#6ab0ff;border-color:#2a5a8a" title="צור שרטוט מכני + GD&T מהמודל הנוכחי">📐 שרטוט+GD&T</button>
+  <button class="btnx" onclick="genDrawing()" style="background:#1a3a5a;color:#6ab0ff;border-color:#2a5a8a" title="נתח GD&T למודל הנוכחי (datums, טולרנסים, גימור שטח). הערה: Fusion לא תומך ביצירת שרטוט תכנותית — השתמש ב-Drawing from Design לשרטוט.">📐 ניתוח GD&T</button>
   <button class="btnx" onclick="explainTimeline()" style="background:#1a3a2a;color:#6affaa;border-color:#2a6a4a" title="הסבר מה עשה כל שלב בציר הזמן">💬 הסבר מודל</button>
 </div>
 
@@ -879,7 +879,7 @@ function doWeightOpt(){
 }
 function genDrawing(){
   const txt=$('inputBox').value.trim();
-  addMsg('system','מייצר שרטוט מכני + GD&T למודל הנוכחי...');
+  addMsg('system','מנתח GD&T למודל הנוכחי...');
   setBusy(true);
   adsk.fusionSendData('gen_drawing',JSON.stringify({text:txt}));
 }
