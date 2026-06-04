@@ -2334,8 +2334,12 @@ barrel_d, bore_d = 1.0, 0.6
 # Leaf A: flat plate, x from -leaf_h to 0  (its inner edge sits ON x=0, the hinge line)
 # Leaf B: flat plate, x from  0 to +leaf_h (its inner edge sits ON x=0, the hinge line)
 #   -> the two leaves are COPLANAR and their inner edges MEET at x=0 (no gap).
-# Barrel/knuckles: cylinders Ø=barrel_d centered ON the hinge line, axis ALONG Y
-#   (sketch a circle on the XZ plane at the hinge point, extrude along Y).
+# Barrel/knuckles: cylinders Ø=barrel_d. CRITICAL — the barrel axis is at
+#   x=0, z = leaf_t/2 (the MID-PLANE of the leaves), so the barrel is LEVEL with
+#   the leaves and the leaf inner edges blend straight into it. The barrel must
+#   NOT sit below/in front of the leaf plane. Make barrel_d >= 2*leaf_t so the
+#   leaf material reaches the barrel. Sketch the circle on the XZ plane at
+#   (x=0, z=leaf_t/2) and extrude ALONG Y.
 #   Split into interleaved segments along Y (Leaf A owns segments 1 & 3, Leaf B owns
 #   segment 2) so they interlock. Fillet leaf->barrel.
 # Pin: cylinder Ø=bore_d ALONG Y through all the knuckles.
