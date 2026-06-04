@@ -51,7 +51,7 @@ CLAUDE_PING    = 'claude-haiku-4-5-20251001'
 GROQ_API_URL   = 'https://api.groq.com/openai/v1/chat/completions'
 GROQ_MODEL     = 'llama-3.3-70b-versatile'
 GEMINI_BASE_URL= 'https://generativelanguage.googleapis.com/v1beta/models'
-GEMINI_MODEL   = 'gemini-2.0-flash'
+GEMINI_MODEL   = 'gemini-2.5-pro'   # much stronger at code than 2.0-flash (free tier has tighter rate limits)
 
 _groq_api_key   = ''
 _gemini_api_key = ''
