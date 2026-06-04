@@ -273,6 +273,8 @@ textarea::placeholder{color:var(--t3)}
 <!-- Provider tabs -->
 <div class="prov-bar">
   <button class="prov-btn active" id="pClaude" onclick="setProvider('claude')">Claude</button>
+  <button class="prov-btn" id="pGemini" onclick="setProvider('gemini')">Gemini</button>
+  <button class="prov-btn" id="pGroq" onclick="setProvider('groq')">Groq</button>
   <button class="prov-btn" id="pOllama" onclick="setProvider('ollama')">Ollama</button>
 </div>
 
@@ -304,6 +306,38 @@ textarea::placeholder{color:var(--t3)}
   </div>
   <div class="row"><label></label>
     <span style="font-size:10px;color:var(--t3)" id="ollamaStatusText">לחץ "זהה" לגלות מודלים מותקנים</span>
+  </div>
+</div>
+
+<!-- Gemini settings -->
+<div class="sett hidden" id="settGemini">
+  <div class="row">
+    <label>API Key:</label>
+    <input type="password" id="geminiKey" placeholder="AIza..." />
+    <button class="btnx g" onclick="saveGeminiKey()">שמור</button>
+    <button class="btnx" onclick="testGeminiKey()" style="padding:4px 8px">בדוק</button>
+  </div>
+  <div class="row" id="geminiStatus" style="display:none">
+    <label></label><span id="geminiStatusText" style="font-size:10px"></span>
+  </div>
+  <div class="row"><label></label>
+    <span style="font-size:9px;color:var(--t3)">מפתח חינם: aistudio.google.com/apikey · מודל: gemini-2.5-pro</span>
+  </div>
+</div>
+
+<!-- Groq settings -->
+<div class="sett hidden" id="settGroq">
+  <div class="row">
+    <label>API Key:</label>
+    <input type="password" id="groqKey" placeholder="gsk_..." />
+    <button class="btnx g" onclick="saveGroqKey()">שמור</button>
+    <button class="btnx" onclick="testGroqKey()" style="padding:4px 8px">בדוק</button>
+  </div>
+  <div class="row" id="groqStatus" style="display:none">
+    <label></label><span id="groqStatusText" style="font-size:10px"></span>
+  </div>
+  <div class="row"><label></label>
+    <span style="font-size:9px;color:var(--t3)">מפתח חינם: console.groq.com/keys</span>
   </div>
 </div>
 
@@ -633,7 +667,7 @@ function setMode(m){
 }
 
 // ── Provider ──
-const ALL_PROVS=['claude','ollama'];
+const ALL_PROVS=['claude','gemini','groq','ollama'];
 function setProvider(p){
   provider=p;
   ALL_PROVS.forEach(x=>{
