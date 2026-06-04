@@ -2295,85 +2295,85 @@ def _get_ollama_models_thread(_params=None):
 # ══════════════════════════════════════════════════════════════
 
 ASSEMBLY_SYSTEM_PROMPT = r"""You are an expert Fusion 360 Python API programmer and mechanical engineer.
-Create multi-component assemblies from natural language descriptions.
+Create multi-part assemblies where every part is positioned to FIT TOGETHER.
 
-OUTPUT FORMAT — return MULTIPLE named functions, one per component:
+OUTPUT — return ONE function that builds the WHOLE assembly in a single pass:
 ```python
-# COMPONENT: Bolt
-def build_bolt(rootComp, config):
+def build_assembly(rootComp):
     import adsk.core, adsk.fusion, math
-    comp = rootComp        # all parts share the root component
-    # build the part AT ITS REAL ASSEMBLED POSITION (see POSITIONING below)
-    return {"bodies": [], "params": {}}
+    comp = rootComp
+    # 1) define SHARED reference values FIRST (one source of truth for the layout)
+    # 2) build every part relative to those values, at its real mating position
+    return {"parts": ["Leaf_A", "Leaf_B", "Pin"]}
 ```
 
-## POSITIONING — THE MOST IMPORTANT RULE (read carefully)
-All parts live in ONE shared coordinate space (rootComp). You CANNOT position
-parts with component transforms / Matrix3D — they are ignored. Position each
-part by drawing its geometry at the correct ABSOLUTE coordinates.
+## WHY ONE FUNCTION (critical)
+You build ALL parts in ONE function so you can position them RELATIVE to each
+other with SHARED variables. Define the key layout values once at the top
+(e.g. hinge_axis, leaf_w, barrel_dia, pin_len) and place every part against them.
+This is what makes parts actually FIT instead of floating apart.
 
-- Choose a shared assembly axis (use Z). Lay every part out along it at its real
-  mating location so the parts actually fit together — NOT stacked at the origin.
-- Parts MUST physically TOUCH their neighbours — NO gaps, NOTHING floating in
-  space. The washer seats FLUSH against the underside of the head (or against the
-  nut). The nut's hole is CONCENTRIC with the shaft and the nut sits ON the shaft
-  at the threaded end — it must not float beyond the shaft tip.
-- Every part is concentric on the same axis (same X,Y center). Double-check each
-  part's Z range so adjacent parts share a face (e.g. washer top = head bottom).
-- To place a sketch at a given Z, create an offset construction plane:
-  `pl_in = comp.constructionPlanes.createInput()
-   pl_in.setByOffset(comp.xYConstructionPlane, adsk.core.ValueInput.createByReal(Z_cm))
-   plane = comp.constructionPlanes.add(pl_in)
-   sketch = comp.sketches.add(plane)`
-  then extrude from there. Or extrude from XY with the correct start/extent.
+## POSITIONING — parts MUST mate (no gaps, no floating, correct orientation)
+- Build all geometry in `comp` (= rootComp) at absolute coordinates. Do NOT use
+  addNewComponent or Matrix3D transforms (they are ignored).
+- Adjacent parts must TOUCH — share a face. NEVER leave a gap or a floating part.
+- Orient cylinders/pins ALONG the correct axis. A hinge barrel runs ALONG the
+  edge where the two leaves meet — it lies flat along that line, it does NOT
+  stick up vertically.
+- To draw a sketch on an offset/!=XY plane, use a construction plane:
+  `pin = comp.constructionPlanes.createInput()
+   pin.setByOffset(comp.xYConstructionPlane, adsk.core.ValueInput.createByReal(OFFSET_cm))
+   pl = comp.constructionPlanes.add(pin); sk = comp.sketches.add(pl)`
+  For a cylinder along Y or X, sketch its circle on the YZ or XZ plane and extrude.
 
-## EXAMPLE LAYOUT — bolt + washer + nut along Z (all cm)
-Let shaft_len, head_h, washer_t, nut_h be the dimensions.
-- build_bolt:   hex head from z=-head_h to z=0; shaft (cylinder Ø=bolt_dia)
-                from z=0 to z=+shaft_len.
-- build_washer: flat ring (Ø_out, Ø_in=bolt_dia+clearance) seated just under the
-                head, from z=0 to z=+washer_t (or up near the nut end).
-- build_nut:    hex prism with a Ø=bolt_dia hole, threaded onto the FAR end:
-                from z=shaft_len-nut_h to z=shaft_len.
-This way the parts are concentric on the Z axis and stacked in their real order.
+## WORKED EXAMPLE — door hinge (study the geometry carefully)
+```
+leaf_w, leaf_h, leaf_t = 6.0, 4.0, 0.4      # cm (length along hinge, depth, thickness)
+barrel_d, bore_d = 1.0, 0.6
+# The HINGE LINE runs along Y at x=0, z=barrel_d/2.
+# Leaf A: flat plate, x from -leaf_h to 0  (its inner edge sits ON x=0, the hinge line)
+# Leaf B: flat plate, x from  0 to +leaf_h (its inner edge sits ON x=0, the hinge line)
+#   -> the two leaves are COPLANAR and their inner edges MEET at x=0 (no gap).
+# Barrel/knuckles: cylinders Ø=barrel_d centered ON the hinge line, axis ALONG Y
+#   (sketch a circle on the XZ plane at the hinge point, extrude along Y).
+#   Split into interleaved segments along Y (Leaf A owns segments 1 & 3, Leaf B owns
+#   segment 2) so they interlock. Fillet leaf->barrel.
+# Pin: cylinder Ø=bore_d ALONG Y through all the knuckles.
+```
+Result: two coplanar leaves whose edges meet, with the barrel lying along that
+meeting edge and the pin through it — NOT a gap with a vertical cylinder above it.
 
-## THREADS (bolts / screws)
-Add COSMETIC thread markings to a bolt/screw shaft (and to a nut's hole) — this
-shows thread lines without the heavy modeled helix. ALWAYS wrap it in try/except
-so a thread failure leaves a clean smooth shaft instead of breaking the part:
+## THREADS (bolts / screws, optional)
+Cosmetic thread markings, ALWAYS wrapped so failure leaves a smooth shaft:
 ```python
 try:
     threads = comp.features.threadFeatures
-    # find the shaft's lateral CYLINDRICAL face:
-    shaft_face = None
-    for f in shaft_body.faces:
-        if f.geometry.objectType == adsk.core.Cylinder.classType():
-            shaft_face = f; break
-    if shaft_face:
+    face = next((f for f in shaft_body.faces
+                 if f.geometry.objectType == adsk.core.Cylinder.classType()), None)
+    if face:
         q = threads.threadDataQuery
-        ok, t_type, t_size, t_desig = q.recommendThreadData(shaft_dia_cm, False)  # diameter in CM, isInternal=False
+        ok, tt, ts, td = q.recommendThreadData(shaft_dia_cm, False)
         if ok:
-            info = threads.createThreadInfo(False, t_type, t_size, t_desig)
-            ti = threads.createInput(shaft_face, info)
-            ti.isModeled = False   # COSMETIC — fast and reliable
+            ti = threads.createInput(face, threads.createThreadInfo(False, tt, ts, td))
+            ti.isModeled = False
             threads.add(ti)
 except Exception:
-    pass   # smooth shaft is an acceptable fallback — never fail the part over threads
+    pass
 ```
-For a nut, do the same on the inner cylindrical face with isInternal=True.
 
 ## RULES
 1. ALL dimensions in CENTIMETERS (1mm = 0.1cm)
-2. Each component is a separate function named `build_<lowercase_name>`
-3. comp = rootComp — do NOT use addNewComponent (it is stripped). Position by geometry.
-4. Use sketch.isComputeDeferred = True/False correctly
-5. Parts must mate concentrically on the shared axis; add 0.1-0.2mm clearances
-6. Add a cosmetic thread to bolts/screws (try/except wrapped, per THREADS)
-7. Add user parameters for key dimensions; name each function clearly"""
+2. ONE function `def build_assembly(rootComp)`; comp = rootComp; no addNewComponent
+3. Every part must TOUCH its neighbours and be oriented correctly — double-check
+   each part's coordinate range against the shared reference values
+4. Use sketch.isComputeDeferred = True/False correctly; add 0.1-0.2mm clearances
+5. Cosmetic thread on bolts/screws if relevant (try/except). User parameters for key dims.
+6. Return ONLY the complete def build_assembly(rootComp) in one ```python block."""
 
 
 def _assembly_pipeline_thread(params):
-    """Build a multi-component assembly."""
+    """Build a multi-part assembly as ONE coherent function so the parts share a
+    coordinate frame and actually fit together (instead of floating apart)."""
     global _last_code, _last_params
 
     prompt   = params.get('text', '')
@@ -2385,87 +2385,70 @@ def _assembly_pipeline_thread(params):
     # Auto-detail: expand a short assembly request into a full engineering spec.
     prompt = _maybe_expand(prompt, params)
 
-    full_prompt = f"""Create a Fusion 360 ASSEMBLY for:
+    full_prompt = f"""Create a Fusion 360 assembly for:
 
 DESCRIPTION: {prompt}
 Material: {material}
 Manufacturing process: {process}
 Units: {units}
 
-Generate all components with correct positioning so they form a complete assembly.
-Return multiple build_<name>() functions, one per component."""
+All parts MUST be positioned to FIT TOGETHER — touching, correctly oriented, no gaps.
+Return ONE def build_assembly(rootComp) that builds the whole assembly in one pass."""
 
-    _send('system', '[1/?] AI generating assembly...')
-    _send_progress(1, 3, 'Generating assembly...')
-
+    _send('system', '[1/2] AI מייצר הרכבה...')
+    _send_progress(1, 2, 'Generating assembly...')
     try:
-        response = _call_claude(
-            ASSEMBLY_SYSTEM_PROMPT,
-            [{'role': 'user', 'content': full_prompt}]
-        )
+        response = _call_claude(ASSEMBLY_SYSTEM_PROMPT, [{'role': 'user', 'content': full_prompt}])
     except Exception as e:
         _send('error', f'AI error: {e}')
         _send_progress(0, 0)
         return
 
-    # Extract all build_* functions
-    pattern = r'```python\s*\n(.*?)```'
-    all_blocks = re.findall(pattern, response, re.DOTALL)
-
-    # Find component blocks
-    comp_blocks = []
-    for block in all_blocks:
-        fns = re.findall(r'def (build_\w+)\(', block)
-        for fn in fns:
-            comp_blocks.append((fn, block.strip()))
-
-    if not comp_blocks:
-        # Fallback: try to find any build_ function
-        single = _extract_python(response, 'def build_')
-        if single:
-            fns = re.findall(r'def (build_\w+)\(', single)
-            for fn in fns:
-                comp_blocks.append((fn, single))
-
-    if not comp_blocks:
-        _send('error', 'לא נמצאו פונקציות build_<name>. נסה לתאר את ההרכבה מחדש.')
+    code = _extract_python(response, 'def build_assembly(')
+    if not code or 'def build_assembly(' not in code:
+        _send('error', 'AI לא החזיר build_assembly(). נסה שוב או פשט את התיאור.')
         _send_progress(0, 0)
         return
-
-    _send('system', f'נמצאו {len(comp_blocks)} רכיבים: {", ".join(n for n, _ in comp_blocks)}')
-
     if show_code:
-        for name, code in comp_blocks[:3]:
-            _send('code', f'# {name}\n' + code[:800])
+        _send('code', code[:2000] + ('...' if len(code) > 2000 else ''))
 
-    # Execute each component
-    built = 0
-    _send_progress(2, 3, f'Building {len(comp_blocks)} components...')
+    # Wrap as build() and run the WHOLE assembly in a SINGLE exec — this is what
+    # lets the parts share coordinates and mate correctly.
+    def _wrap(c):
+        return c + '\n\ndef build(rootComp, config):\n    return build_assembly(rootComp)\n'
 
-    for i, (fn_name, code) in enumerate(comp_blocks):
-        _send('system', f'[{i+1}/{len(comp_blocks)}] Building {fn_name}...')
+    _send('system', '[2/2] בונה הרכבה ב-Fusion...')
+    _send_progress(2, 2, 'Building assembly...')
+    res = _fire_and_wait({'mode': 'model', 'code': _wrap(code)}, timeout=120)
 
-        # Wrap single function for execution
-        exec_code = code + f'\n\ndef build(rootComp, config):\n    return {fn_name}(rootComp, config)\n'
-        res = _fire_and_wait({'mode': 'model', 'code': exec_code})
-        if res.get('ok'):
-            built += 1
-            _send('success', f'{fn_name} — built in {res["info"].get("exec_time_ms","?")}ms')
-            _last_params.update(res['info'].get('params', {}))
-        else:
-            _send('error', f'{fn_name} failed: {res.get("msg","")[:200]}')
+    if not res.get('ok'):
+        _send('system', f'נכשל — מנסה לתקן ({res.get("msg","")[:120]})...')
+        try:
+            fix = _call_claude(ASSEMBLY_SYSTEM_PROMPT, [
+                {'role': 'user', 'content': full_prompt},
+                {'role': 'assistant', 'content': response},
+                {'role': 'user', 'content': f"FAILED with:\n{res.get('msg','')[:600]}\nFix it and return the complete def build_assembly(rootComp)."},
+            ])
+            fix_code = _extract_python(fix, 'def build_assembly(')
+            if fix_code:
+                code = fix_code
+                res = _fire_and_wait({'mode': 'model', 'code': _wrap(fix_code)}, timeout=120)
+        except Exception:
+            pass
 
-    _send_progress(0, 0)
-    if built > 0:
-        _send_params(_last_params)
-        # Take screenshot
+    if res.get('ok'):
+        _last_code = code
+        info = res.get('info', {})
+        _last_params = info.get('params', {})
+        if info.get('params'):
+            _send_params(info['params'])
         shot = _fire_and_wait({'mode': 'screenshot'}, timeout=10)
-        if shot.get('ok') and shot.get('b64'):
-            if _palette:
-                _palette.sendInfoToHTML('screenshot', json.dumps({'b64': shot['b64']}))
-        _send('done', f'הרכבה מוכנה! {built}/{len(comp_blocks)} רכיבים נבנו.')
+        if shot.get('ok') and shot.get('b64') and _palette:
+            _palette.sendInfoToHTML('screenshot', json.dumps({'b64': shot['b64']}))
+        _send('done', 'הרכבה מוכנה!')
     else:
-        _send('error', 'כל הרכיבים נכשלו. נסה לפשט את התיאור.')
+        _send('error', f'הרכבה נכשלה: {res.get("msg", "")[:400]}')
+    _send_progress(0, 0)
 
 
 def _weight_opt_thread(params):
