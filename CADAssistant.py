@@ -876,8 +876,11 @@ _ALLOWED_MODULES = {
     'adsk', 'adsk.core', 'adsk.fusion', 'adsk.cam',
     'adsk.drawing', 'math', 'collections', 'json', 're',
     'itertools', 'functools',
-    # Safe, read-only — drawings use these for the title-block date.
-    'datetime', 'time',
+    # Safe, pure-computation/formatting stdlib modules that generated code
+    # (especially drawings) commonly imports. No I/O, network, or system access,
+    # so allowing them doesn't weaken the sandbox against os/subprocess/socket.
+    'datetime', 'time', 'traceback', 'random', 'string', 'copy',
+    'decimal', 'fractions',
 }
 
 
