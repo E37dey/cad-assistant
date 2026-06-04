@@ -2302,13 +2302,39 @@ Let shaft_len, head_h, washer_t, nut_h be the dimensions.
                 from z=shaft_len-nut_h to z=shaft_len.
 This way the parts are concentric on the Z axis and stacked in their real order.
 
+## THREADS (bolts / screws)
+Add COSMETIC thread markings to a bolt/screw shaft (and to a nut's hole) — this
+shows thread lines without the heavy modeled helix. ALWAYS wrap it in try/except
+so a thread failure leaves a clean smooth shaft instead of breaking the part:
+```python
+try:
+    threads = comp.features.threadFeatures
+    # find the shaft's lateral CYLINDRICAL face:
+    shaft_face = None
+    for f in shaft_body.faces:
+        if f.geometry.objectType == adsk.core.Cylinder.classType():
+            shaft_face = f; break
+    if shaft_face:
+        q = threads.threadDataQuery
+        ok, t_type, t_size, t_desig = q.recommendThreadData(shaft_dia_cm, False)  # diameter in CM, isInternal=False
+        if ok:
+            info = threads.createThreadInfo(False, t_type, t_size, t_desig)
+            ti = threads.createInput(shaft_face, info)
+            ti.isModeled = False   # COSMETIC — fast and reliable
+            threads.add(ti)
+except Exception:
+    pass   # smooth shaft is an acceptable fallback — never fail the part over threads
+```
+For a nut, do the same on the inner cylindrical face with isInternal=True.
+
 ## RULES
 1. ALL dimensions in CENTIMETERS (1mm = 0.1cm)
 2. Each component is a separate function named `build_<lowercase_name>`
 3. comp = rootComp — do NOT use addNewComponent (it is stripped). Position by geometry.
 4. Use sketch.isComputeDeferred = True/False correctly
 5. Parts must mate concentrically on the shared axis; add 0.1-0.2mm clearances
-6. Add user parameters for key dimensions; name each function clearly"""
+6. Add a cosmetic thread to bolts/screws (try/except wrapped, per THREADS)
+7. Add user parameters for key dimensions; name each function clearly"""
 
 
 def _assembly_pipeline_thread(params):
