@@ -2279,6 +2279,12 @@ part by drawing its geometry at the correct ABSOLUTE coordinates.
 
 - Choose a shared assembly axis (use Z). Lay every part out along it at its real
   mating location so the parts actually fit together — NOT stacked at the origin.
+- Parts MUST physically TOUCH their neighbours — NO gaps, NOTHING floating in
+  space. The washer seats FLUSH against the underside of the head (or against the
+  nut). The nut's hole is CONCENTRIC with the shaft and the nut sits ON the shaft
+  at the threaded end — it must not float beyond the shaft tip.
+- Every part is concentric on the same axis (same X,Y center). Double-check each
+  part's Z range so adjacent parts share a face (e.g. washer top = head bottom).
 - To place a sketch at a given Z, create an offset construction plane:
   `pl_in = comp.constructionPlanes.createInput()
    pl_in.setByOffset(comp.xYConstructionPlane, adsk.core.ValueInput.createByReal(Z_cm))
