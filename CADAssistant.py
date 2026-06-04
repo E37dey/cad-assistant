@@ -1525,6 +1525,64 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                 ok, msg = _execute_drawing(payload['code'], _app, payload.get('gdt_data'))
                 _exec_result = {'ok': ok, 'msg': msg}
 
+            elif mode == 'assembly_real':
+                # REAL assembly: build_assembly creates its own Components + Joints.
+                # Run WITHOUT the addNewComponent-stripping sanitizer, then VALIDATE
+                # (>=2 components, no bodies under root, a non-rigid joint if motion
+                # is required) and report Success only if it genuinely passes.
+                code = payload.get('code', '')
+                need_motion = bool(payload.get('need_motion'))
+                ok_v, reason = _validate_code(code)
+                design = adsk.fusion.Design.cast(_app.activeProduct)
+                if not ok_v:
+                    _exec_result = {'ok': False, 'msg': reason}
+                elif not design:
+                    _exec_result = {'ok': False, 'msg': 'אין עיצוב פעיל'}
+                else:
+                    rootComp = design.rootComponent
+                    ns = _make_namespace()
+                    ns['adsk'] = adsk; ns['app'] = _app; ns['ui'] = _app.userInterface
+                    ns['design'] = design; ns['rootComp'] = rootComp
+                    ns['__builtins__']['adsk'] = adsk
+                    try:
+                        exec(compile(code, '<assembly_real>', 'exec'), ns)
+                        fn = ns.get('build_assembly')
+                        if not callable(fn):
+                            _exec_result = {'ok': False, 'msg': 'No build_assembly() found'}
+                        else:
+                            info = fn(rootComp)
+                            adsk.doEvents()
+                            n_occ = rootComp.occurrences.count
+                            n_joints, nonrigid = 0, 0
+                            for coll in (rootComp.joints, rootComp.asBuiltJoints):
+                                for i in range(coll.count):
+                                    n_joints += 1
+                                    try:
+                                        jt = coll.item(i).jointMotion.jointType
+                                        if jt != adsk.fusion.JointTypes.RigidJointType:
+                                            nonrigid += 1
+                                    except Exception:
+                                        pass
+                            root_bodies = rootComp.bRepBodies.count
+                            problems = []
+                            if n_occ < 2:
+                                problems.append('רק {} components (צריך >=2)'.format(n_occ))
+                            if root_bodies > 0:
+                                problems.append('{} bodies תחת Root (אסור בהרכבה)'.format(root_bodies))
+                            if need_motion and nonrigid == 0:
+                                problems.append('אין joint לא-קשיח — אין תנועה')
+                            result = {'components': n_occ, 'joints': n_joints,
+                                      'nonrigid': nonrigid, 'root_bodies': root_bodies,
+                                      'info': info if isinstance(info, dict) else {}}
+                            if problems:
+                                result['ok'] = False
+                                result['msg'] = 'Validation נכשל: ' + '; '.join(problems)
+                            else:
+                                result['ok'] = True
+                            _exec_result = result
+                    except Exception as e:
+                        _exec_result = {'ok': False, 'msg': '{}'.format(e)}
+
             elif mode == 'export':
                 ok, msg = _do_export(payload.get('fmt', 'step'))
                 _exec_result = {'ok': ok, 'msg': msg}
@@ -1587,6 +1645,19 @@ def _is_edit(text):
 def _is_reset(text):
     low = text.lower()
     return any(k in low for k in RESET_KEYWORDS)
+
+
+# Words that imply a MOVING mechanism → build with real components + joints.
+MOTION_KEYWORDS = [
+    'assembly', 'joint', 'hinge', 'motion', 'rotate', 'rotating', 'move', 'moving',
+    'slider', 'revolute', 'mechanism', 'gear', 'robot', 'robotic', 'linkage', 'pivot',
+    'ציר', 'מנגנון', 'תנועה', 'מסתובב', 'סיבוב', 'גלגל שיניים', 'זרוע', 'מפרק', 'נע',
+]
+
+
+def _is_motion_assembly(text):
+    low = (text or '').lower()
+    return any(k in low for k in MOTION_KEYWORDS)
 
 
 def _lang(text):
@@ -2365,6 +2436,179 @@ Never pass a raw mm number to the API.
 - Return ONLY the complete def build_assembly(rootComp) in ONE ```python block. No prose."""
 
 
+ASSEMBLY_MOTION_SYSTEM_PROMPT = r"""You are an expert Autodesk Fusion 360 API (Python) developer building REAL ASSEMBLIES with moving parts. Every mechanical part is a separate COMPONENT (not a body under root), connected by JOINTS so it actually moves in Fusion.
+
+== OUTPUT FORMAT ==
+Return ONE function in a single ```python block:
+```python
+def build_assembly(rootComp):
+    import adsk.core, adsk.fusion, math, traceback
+    # adsk, app, ui, design, rootComp are available as globals. Do NOT call documents.add().
+    def cm(mm): return mm / 10.0   # Fusion API is in CM; define dims in mm, convert with cm()
+    step = 'start'
+    try:
+        # ... create components, build geometry inside them, add joints, ground, drive ...
+        return {"components": [...names...], "joints": [...{"type":..,"between":..}..],
+                "grounded": "...", "moving": "...", "drive_ok": True}
+    except Exception as e:
+        raise RuntimeError('Failed at step "{}": {}'.format(step, e))
+```
+
+== RULE 1 — REAL COMPONENTS (critical) ==
+Each independent mechanical part MUST be its own Component, NOT a body under root.
+WRONG: root.sketches.add(...)   /   root.features.extrudeFeatures
+RIGHT:
+    occ = rootComp.occurrences.addNewComponent(adsk.core.Matrix3D.create())
+    comp = occ.component
+    comp.name = "Leaf_A"
+    sk = comp.sketches.add(comp.xYConstructionPlane)
+    ext = comp.features.extrudeFeatures
+ALL sketches, construction planes, extrudes, revolves, holes, combines for a part
+go INSIDE that part's component. Keep both the occurrence (occ) and component (comp)
+references — you need the OCCURRENCE for joints/grounding.
+Result tree: Root -> Leaf_A:1 / Leaf_B:1 / Pin:1 (each with its own Bodies). NEVER put bodies under Root.
+
+== RULE 2 — POSITION + DATUM ==
+Define a single datum axis + origin at the top. Build each component's geometry at its
+real assembled position relative to that datum (parts that share a rotation axis are
+concentric to the SAME axis, computed once). Parts must touch, not float.
+
+== RULE 3 — JOINTS (the motion) ==
+Connect components with joints. Supported jointMotion types and how to set them on a JointInput:
+- Rigid:       ji.setAsRigidJointMotion()
+- Revolute:    ji.setAsRevoluteJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
+- Slider:      ji.setAsSliderJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
+- Cylindrical: ji.setAsCylindricalJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
+- Planar:      ji.setAsPlanarJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
+- Ball:        ji.setAsBallJointMotion(...)
+Joint creation (use a joint origin point ON the rotation/translation axis):
+    cpi = rootComp.constructionPoints.createInput()
+    cpi.setByPoint(adsk.core.Point3D.create(cm(ax), cm(ay), cm(az)))   # a point on the axis
+    pt = rootComp.constructionPoints.add(cpi)
+    geo0 = adsk.fusion.JointGeometry.createByPoint(pt)
+    ji = rootComp.joints.createInput(geo0, geo0)   # same axis origin for both halves
+    ji.occurrenceOne = occ_moving      # the part that MOVES
+    ji.occurrenceTwo = occ_fixed       # the reference part
+    ji.setAsRevoluteJointMotion(adsk.fusion.JointDirections.XAxisJointDirection)  # axis dir
+    joint = rootComp.joints.add(ji)
+Choose the JointDirection (X/Y/Z) to MATCH the real axis (the pin/shaft direction).
+Wrap each joint in try/except that re-raises with a clear step name (do NOT silently swallow —
+the assembly is only a success if joints exist).
+
+== RULE 4 — GROUND, LIMITS, DRIVE ==
+- Ground the base component:  occ_base.isGrounded = True
+- Limits (revolute, radians):
+    rm = joint.jointMotion
+    rm.rotationLimits.isMinimumValueEnabled = True; rm.rotationLimits.minimumValue = 0
+    rm.rotationLimits.isMaximumValueEnabled = True; rm.rotationLimits.maximumValue = math.radians(180)
+- Drive to a test angle to prove it moves:  rm.rotationValue = math.radians(90)
+  (for slider use slideValue, for cylindrical rotationValue/slideValue) — wrap in try/except.
+
+== HINGE RECIPE (follow exactly when asked for a hinge/ציר) ==
+- Leaf_A, Leaf_B, Pin are THREE separate components.
+- Hinge axis = pin centerline; both leaves' inner knuckles are concentric to it.
+- Leaf_A and Leaf_B extend in OPPOSITE directions from the axis (flat = 180deg apart).
+- Interleaved knuckles: Leaf_A even segments, Leaf_B odd, axial clearance ~0.2-0.3mm.
+- Ground Leaf_A. Rigid joint Pin<->Leaf_A. Revolute joint Leaf_B<->Leaf_A about the pin axis.
+- Limits 0..180deg; drive to 90deg to test.
+
+== VALIDATION (do this at the END, before returning) ==
+- Count components you created; if fewer than expected, raise RuntimeError naming the missing one.
+- If the request needs motion, assert at least one NON-RIGID joint was created; else raise.
+- Assert no body was created directly under rootComp (rootComp.bRepBodies.count == 0).
+Return the structured dict (components, joints with types, grounded, moving, drive_ok).
+
+== FINISH ==
+Chamfers/fillets 0.4-0.6 mm on knuckle ends and cylinder mouths (each in its own try/except).
+Pin gets a head one end + chamfer the other. Add 0.2mm radial clearance pin-to-bore.
+
+Return ONLY the complete def build_assembly(rootComp) in ONE ```python block. No prose."""
+
+
+def _real_assembly_pipeline_thread(params):
+    """Build a REAL assembly: separate Components + Joints (it moves in Fusion).
+    Validates the result (components, joints, motion) and only reports success
+    if it genuinely passes."""
+    global _last_code, _last_params
+    raw = params.get('text', '')
+    if not raw:
+        _send('error', 'תאר את ההרכבה')
+        _send_progress(0, 0)
+        return
+
+    need_motion = _is_motion_assembly(raw)
+    prompt = _maybe_expand(raw, params)
+    motion_line = ('This mechanism MUST MOVE — create the right joints (revolute/slider/...), '
+                   'ground the base component, set limits, and drive to a test angle.'
+                   if need_motion else 'Create each part as a separate component.')
+    full = """Build a REAL Fusion 360 assembly (separate Components + Joints) for:
+{}
+
+Material: {}
+{}""".format(prompt, params.get('material', 'Steel'), motion_line)
+
+    _send('system', '[1/2] AI מייצר הרכבה אמיתית (Components + Joints)...')
+    _send_progress(1, 2, 'Generating real assembly...')
+    try:
+        resp = _call_claude(ASSEMBLY_MOTION_SYSTEM_PROMPT, [{'role': 'user', 'content': full}])
+    except Exception as e:
+        _send('error', 'AI error: {}'.format(e))
+        _send_progress(0, 0)
+        return
+
+    code = _extract_python(resp, 'def build_assembly(')
+    if not code or 'def build_assembly(' not in code:
+        _send('error', 'AI לא החזיר build_assembly(). נסה שוב.')
+        _send_progress(0, 0)
+        return
+    if params.get('show_code'):
+        _send('code', code[:2000] + ('...' if len(code) > 2000 else ''))
+
+    _send('system', '[2/2] בונה Components + Joints ב-Fusion...')
+    _send_progress(2, 2, 'Building real assembly...')
+    res = _fire_and_wait({'mode': 'assembly_real', 'code': code, 'need_motion': need_motion}, timeout=150)
+
+    if not res.get('ok'):
+        _send('system', 'נכשל ({}) — מתקן...'.format(res.get('msg', '')[:140]))
+        try:
+            fix = _call_claude(ASSEMBLY_MOTION_SYSTEM_PROMPT, [
+                {'role': 'user', 'content': full},
+                {'role': 'assistant', 'content': resp},
+                {'role': 'user', 'content': 'FAILED:\n{}\nFix and return the complete def build_assembly(rootComp).'.format(res.get('msg', '')[:600])},
+            ])
+            fc = _extract_python(fix, 'def build_assembly(')
+            if fc:
+                code = fc
+                res = _fire_and_wait({'mode': 'assembly_real', 'code': fc, 'need_motion': need_motion}, timeout=150)
+        except Exception:
+            pass
+
+    if res.get('ok'):
+        _last_code = code
+        shot = _fire_and_wait({'mode': 'screenshot'}, timeout=10)
+        if shot.get('ok') and shot.get('b64') and _palette:
+            _palette.sendInfoToHTML('screenshot', json.dumps({'b64': shot['b64']}))
+        info = res.get('info', {})
+        names = ', '.join(info.get('components', [])) if isinstance(info.get('components'), list) else ''
+        report = (
+            'ASSEMBLY REPORT\n'
+            '================\n'
+            'Components: {}   {}\n'.format(res.get('components', '?'), names) +
+            'Joints: {}  (non-rigid: {})\n'.format(res.get('joints', '?'), res.get('nonrigid', '?')) +
+            'Grounded: {}   Moving: {}\n'.format(info.get('grounded', '?'), info.get('moving', '?')) +
+            'Drive joint: {}\n'.format('available' if info.get('drive_ok') else '—') +
+            'Bodies under Root: {} (must be 0)'.format(res.get('root_bodies', '?'))
+        )
+        _send('code', report)
+        if res.get('nonrigid', 0) > 0:
+            _send('done', '🎬 הרכבה חיה מוכנה! גרור חלק או Animate Joint ב-Fusion כדי לראות תנועה.')
+        else:
+            _send('done', 'הרכבה מוכנה (Components נפרדים, ללא תנועה).')
+    else:
+        _send('error', 'הרכבה נכשלה: {}'.format(res.get('msg', '')[:400]))
+    _send_progress(0, 0)
+
+
 def _assembly_pipeline_thread(params):
     """Build a multi-part assembly as ONE coherent function so the parts share a
     coordinate frame and actually fit together (instead of floating apart)."""
@@ -2990,7 +3234,8 @@ class HTMLEventHandler(adsk.core.HTMLEventHandler):
                 if not _claude_api_key:
                     _send('error', 'מצב הרכבה מצריך Claude API.')
                     return
-                t = threading.Thread(target=_assembly_pipeline_thread, args=(data,), daemon=True)
+                # Assemblies now build REAL Components + Joints (movable in Fusion).
+                t = threading.Thread(target=_real_assembly_pipeline_thread, args=(data,), daemon=True)
                 t.start()
 
             elif action == 'test_api_key':
