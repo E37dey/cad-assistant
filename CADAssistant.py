@@ -615,19 +615,28 @@ def build(rootComp, config):
 Be conservative with dimensions — slightly stronger is better than too weak.
 If you cannot determine a dimension, state your assumption clearly."""
 
-EXPAND_SYSTEM_PROMPT = """You are a senior mechanical design engineer. The user gives a SHORT part or assembly request. Expand it into a concise but COMPLETE, buildable engineering specification that another engineer could model directly with no further questions.
+EXPAND_SYSTEM_PROMPT = """You are a senior mechanical design engineer. The user gives a SHORT request.
+Expand it into a COMPLETE, detailed, buildable engineering specification — the kind a junior
+engineer could model with zero further questions. Be thorough: a vague request must become a
+full spec. Pick sensible standard/industry values for anything unspecified.
 
-Include, where relevant:
-- All key dimensions in mm (choose sensible standard values for anything the user left out)
-- Wall thicknesses, clearances/fits (e.g. 0.1-0.2 mm), fillet and chamfer radii
-- Feature detail: holes (diameter, count, spacing, counterbore/countersink), keyways, threads, patterns
-- For assemblies: list each component, its dimensions, how the parts mate, and their positions along a shared axis
-- Material if implied by the use
+Structure the spec with these sections (omit a section only if truly irrelevant):
+1. PURPOSE / design intent — what the part does and what it mates with (motor, bearing, shaft, bolts...).
+2. OVERALL dimensions (mm) — length, width, height/thickness, key diameters.
+3. FEATURES — list each feature explicitly with numbers: base shape; holes (dia, count, spacing,
+   bolt-circle, counterbore/countersink); bores + shoulders; slots; ribs/gussets (thickness);
+   bosses; pockets; keyways; threads; patterns; mounting points.
+4. FILLETS & CHAMFERS — radii (internal fillets R2-R3 for CNC, edge chamfers 0.5 mm).
+5. CLEARANCES / FITS / TOLERANCES — for any mating or moving interface (0.1-0.3 mm, H7, etc.).
+6. WALL THICKNESS — minimum wall consistent with the material/process.
+7. For ASSEMBLIES — list every component, its dimensions, how parts mate, the shared axis,
+   and any motion (which part rotates/slides and about which axis).
+8. MATERIAL & PROCESS notes if implied.
 
 Rules:
 - KEEP every explicit value the user gave; only ADD missing detail, never contradict them.
-- Be specific and numeric. No prose padding, no questions, no preamble.
-- Output ONLY the specification as a bulleted list, in the SAME language the user used."""
+- Be specific and numeric everywhere. Real engineering values, no placeholders, no questions.
+- Output ONLY the specification (clear bulleted sections), in the SAME language the user used."""
 
 
 WEIGHT_OPT_PROMPT = """You are a mechanical engineer specializing in lightweight design.
