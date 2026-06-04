@@ -1712,6 +1712,40 @@ def _maybe_expand(prompt, params):
     return prompt
 
 
+def _engineering_report(material, process):
+    """Print a concise engineering summary of the built part from the live model."""
+    try:
+        ctx_res = _fire_and_wait({'mode': 'get_context'}, timeout=15)
+        ctx = ctx_res.get('context', {}) if ctx_res.get('ok') else {}
+        if not ctx or 'error' in ctx:
+            return
+        bbox   = ctx.get('bbox_mm') or {}
+        bodies = ctx.get('bodies', [])
+        total_mass = sum((b.get('mass_kg') or 0) for b in bodies)
+        mat = MATERIAL_PROPS.get(material, {})
+
+        L = ['PART REPORT', '=' * 28]
+        L.append('Name:      {}'.format(ctx.get('component_name', '?')))
+        L.append('Material:  {}  (yield {} MPa)'.format(material, mat.get('yield', '?')))
+        L.append('Process:   {}'.format(process))
+        if bbox:
+            L.append('Size:      {} x {} x {} mm'.format(bbox.get('x', '?'), bbox.get('y', '?'), bbox.get('z', '?')))
+        L.append('Bodies: {}   Features: {}   Params: {}'.format(
+            ctx.get('body_count', '?'), len(ctx.get('features', [])), len(ctx.get('parameters', {}))))
+        L.append('Est. mass: {} kg'.format(round(total_mass, 4)))
+
+        warns = []
+        for b in bodies:
+            if re.match(r'^(Body|Component|Sketch)\d+$', b.get('name', '')):
+                warns.append('generic name "{}"'.format(b.get('name')))
+        if not ctx.get('parameters'):
+            warns.append('no user parameters (not parametric)')
+        L.append('Warnings:  ' + ('; '.join(warns[:4]) if warns else 'none'))
+        _send('code', '\n'.join(L))
+    except Exception:
+        pass
+
+
 def _verify_and_correct(request, code):
     """Measure the just-built part and, if a requested dimension drifted beyond
     ~0.5 mm, delete it and rebuild a corrected version ONCE. Returns the final
@@ -2003,6 +2037,9 @@ Rewrite the COMPLETE def build() function, keeping the original design intent.""
     # ── Verification: measure the part and auto-correct dimension drift ──
     if use_api:
         code = _verify_and_correct(prompt, code)
+
+    # ── Engineering report (name, material, dims, features, mass, warnings) ──
+    _engineering_report(material, process)
 
     # Screenshot after successful build
     shot = _fire_and_wait({'mode': 'screenshot'}, timeout=10)
