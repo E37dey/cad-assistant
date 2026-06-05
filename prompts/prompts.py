@@ -36,9 +36,11 @@ Use the real feature APIs, each inside `comp`:
   .filletFeatures  .chamferFeatures  .rectangularPatternFeatures  .circularPatternFeatures
   .shellFeatures  .threadFeatures
 HOLES & CUTS (this is where builds fail — be careful):
-- A hole/bore/cut MUST intersect a real existing body. Sketch the hole circle ON A FACE of the
-  TARGET body (pick a planar face from body.faces), NOT on a default plane in empty space.
-- STRONGLY PREFER holeFeatures (it auto-targets the body the face belongs to):
+- For ANY round hole/bore you MUST use holeFeatures placed ON A FACE of the target body.
+  Do NOT use a cut-extrude for round holes — that causes "No target body found to cut".
+- A hole/bore/cut MUST intersect a real existing body. Place it ON a face of the TARGET body
+  (pick a planar face from body.faces), NEVER on a default plane in empty space.
+- holeFeatures auto-targets the body the face belongs to:
     holes = comp.features.holeFeatures
     hi = holes.createSimpleInput(adsk.core.ValueInput.createByReal(cm(hole_dia)))
     hi.setPositionByPoint(face, point_on_face)

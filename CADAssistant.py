@@ -2026,12 +2026,15 @@ Broken code:
 Fix ONLY what caused the error. KEEP every requested feature (holes, keyways,
 threads, patterns, fillets) — do NOT simplify the part to avoid the error.
 Correct-API reminders:
+- "No target body found to cut or intersect" => you used a cut-extrude on a sketch
+  that is NOT on/through a body. FIX: build the body CENTERED on the origin, then make
+  EVERY round hole with holeFeatures placed ON A FACE of that body (hi.setPositionByPoint(
+  face, face.centroid); hi.setAllExtent(...)). Do NOT cut-extrude round holes.
 - isComputeDeferred=False BEFORE reading .profiles
 - ALL dims in CM (mm÷10)
 - A ring/annulus = 2 concentric circles in ONE sketch (profile.union() doesn't exist)
 - Polygons via sk.sketchCurves.sketchLines.addByTwoPoints (no sketchPolygon)
 - Parameter names: ASCII letters/digits/underscore only
-- Real threads: comp.features.threadFeatures.createInput(face, True) (NOT ThreadFeatureInputParameters)
 - config is always {{}} — define all dims as local variables, never config['...']
 
 Rewrite the COMPLETE def build() function, keeping the original design intent."""
