@@ -12,11 +12,18 @@ It supports four AI back‑ends — **Anthropic Claude**, **Google Gemini**, **G
 
 ### Modeling
 - **Chat‑to‑CAD** — natural‑language description → a real parametric 3D body, with user parameters for every dimension.
-- **Accuracy verification loop** — after building, the model measures the actual bounding box + parameters, compares them to what you asked for, and **rebuilds a corrected version** if anything is off by more than ~0.5 mm (acts like a QC inspector).
-- **Auto‑detail (`פירוט אוטו'`)** — expands a short request ("coupling") into a full engineering spec (dimensions, clearances, fillets, hole patterns) *before* building. Short input → sophisticated output.
+- **Engineering‑grade Part Builder** — builds a clean **feature tree** (base → holes → fillets → chamfers → patterns → threads → shells), parameter‑driven, with **functional names** (`Base_Plate`, `Bearing_Bore` — not `Body1`), and **manufacturing‑aware** geometry that adapts to the chosen process (CNC / FDM / sheet‑metal / injection).
+- **Auto‑detail (`פירוט אוטו'`, on by default)** — expands a short request ("coupling") into a full engineering spec (purpose, dimensions, every feature, clearances, fillets, wall thickness) *before* building. Short input → sophisticated output.
+- **Accuracy verification loop** — after building, it measures the actual bounding box + parameters, compares them to your request, and **rebuilds a corrected version** if anything drifts more than ~0.5 mm (a QC inspector).
+- **Engineering report** — after each build: name, material + yield, process, overall size, body/feature/parameter counts, estimated mass, and warnings.
 - **Self‑healing** — if generated code fails in Fusion, the error is fed back to the model, which fixes and re‑runs it (up to 3 retries).
 - **Smart editing** — "make the holes 10 mm", "add a chamfer" — applied to the existing model using multi‑turn conversation memory.
-- **Multi‑component assemblies** — bolts, hinges, couplings, etc., with parts positioned along a shared axis and cosmetic threads on fasteners.
+
+### Assemblies
+- **Real assemblies** — assembly mode builds **separate Components** (not bodies under Root), each with its own geometry — the correct Fusion structure.
+- **Joints & motion** — for mechanisms (hinge, gear, linkage, …) it adds real **Joints** (Rigid / Revolute / Slider / Cylindrical / Planar / Ball), grounds the base, sets limits, and drives a test angle so the assembly actually **moves** in Fusion.
+- **Honest validation** — it counts components & joints and **only reports success if the assembly is genuinely valid** (≥2 components, no stray root bodies, a non‑rigid joint when motion is required), with a structured report (components, joints, grounded/moving, drive).
+- **Auto intent detection** — keywords like *hinge / ציר / mechanism / gear* automatically switch to a moving‑assembly build.
 
 ### Engineering
 - **GD&T analysis** — generates datums, feature control frames (with symbols ⊕ ⊥ ∥ ◎), surface finishes, and dimensional tolerances per ASME Y14.5, shown as a formatted report.
@@ -106,13 +113,13 @@ flange coupling: 90 mm disc, 15 mm thick, 40 mm hub, 25 mm bore with a 6 mm keyw
 
 Some things are genuinely **not exposed** through Fusion's API. The app is honest about these and points you to the reliable native tool:
 
-| Want | Status | Do this instead |
-|------|--------|-----------------|
-| **2D drawings** | ❌ Not possible via API (confirmed by Autodesk) | Fusion's native **Drawing → From Design** |
-| **Real threads** | ⚠️ Cosmetic only, version‑dependent | Fusion's native **Modify → Thread** |
-| **Moving assemblies (joints)** | ⚠️ Possible but unreliable via AI code | Fusion's native **Assemble → Joint** |
+| Want | Status | Notes |
+|------|--------|-------|
+| **2D drawings** | ❌ Not possible via API (confirmed by Autodesk) | Use Fusion's native **Drawing → From Design** |
+| **Real threads** | ⚠️ Cosmetic only, version‑dependent | Or Fusion's native **Modify → Thread** |
+| **Moving assemblies (joints)** | ✅ Supported (real components + joints, with honest validation) | AI joint geometry is finicky; the build *validates* and won't falsely claim motion. For guaranteed motion, Fusion's **Assemble → Joint** is 2 clicks. |
 
-The app focuses on what it does reliably — building accurate, dimensioned parts and static assemblies — and leaves these finicky details to Fusion's purpose‑built tools.
+2D drawings are genuinely unavailable through Fusion's API; the rest the app does its best at and is honest when it can't.
 
 ---
 

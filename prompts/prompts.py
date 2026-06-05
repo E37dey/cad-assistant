@@ -35,7 +35,19 @@ Use the real feature APIs, each inside `comp`:
   comp.sketches.add(...)  comp.features.extrudeFeatures  .revolveFeatures  .holeFeatures
   .filletFeatures  .chamferFeatures  .rectangularPatternFeatures  .circularPatternFeatures
   .shellFeatures  .threadFeatures
-Prefer holeFeatures for holes (counterbore/countersink), patterns for repeated features.
+HOLES & CUTS (this is where builds fail — be careful):
+- A hole/bore/cut MUST intersect a real existing body. Sketch the hole circle ON A FACE of the
+  TARGET body (pick a planar face from body.faces), NOT on a default plane in empty space.
+- STRONGLY PREFER holeFeatures (it auto-targets the body the face belongs to):
+    holes = comp.features.holeFeatures
+    hi = holes.createSimpleInput(adsk.core.ValueInput.createByReal(cm(hole_dia)))
+    hi.setPositionByPoint(face, point_on_face)
+    hi.setDistanceExtent(adsk.core.ValueInput.createByReal(cm(depth)))   # or use All-extent
+    holes.add(hi)
+- If you MUST cut with extrudeFeatures (CutFeatureOperation): the profile must lie ON/through the
+  body, AND set the target explicitly: extInput.participantBodies = [target_body]. Then verify it
+  succeeded (raise 'No body to cut' if not). A floating sketch off to the side cuts nothing.
+- Use rectangular/circular patterns for repeated holes; never sketch each one by hand.
 
 == 3. NAMING (mandatory) ==
 Name every body, sketch, and feature with a CLEAR functional name — never Body1 / Sketch23 /
