@@ -49,6 +49,29 @@ HOLES & CUTS (this is where builds fail — be careful):
   succeeded (raise 'No body to cut' if not). A floating sketch off to the side cuts nothing.
 - Use rectangular/circular patterns for repeated holes; never sketch each one by hand.
 
+WORKED EXAMPLE — block with a centered through-bore (COPY this pattern exactly):
+```python
+W, H, T, bore = 70.0, 50.0, 40.0, 30.0   # mm
+# Build the block CENTERED on the origin so a centered bore lands INSIDE it:
+sk = comp.sketches.add(comp.xYConstructionPlane); sk.name = 'BaseSketch'
+sk.sketchCurves.sketchLines.addTwoPointRectangle(
+    adsk.core.Point3D.create(cm(-W/2), cm(-H/2), 0),
+    adsk.core.Point3D.create(cm(W/2),  cm(H/2),  0))
+prof = sk.profiles.item(0)
+e = comp.features.extrudeFeatures.addSimple(
+    prof, adsk.core.ValueInput.createByReal(cm(T)),
+    adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+block = e.bodies.item(0); block.name = 'BlockBody'
+# Bore: place the hole ON the block's TOP face at its centre — it auto-cuts the block:
+top = max(block.faces, key=lambda f: f.centroid.z)
+holes = comp.features.holeFeatures
+hi = holes.createSimpleInput(adsk.core.ValueInput.createByReal(cm(bore)))
+hi.setPositionByPoint(top, top.centroid)
+hi.setAllExtent(adsk.fusion.ExtentDirections.NegativeExtentDirection)   # through all
+holes.add(hi)
+```
+The hole is placed ON the body's face, so it ALWAYS cuts the body — never a floating sketch.
+
 == 3. NAMING (mandatory) ==
 Name every body, sketch, and feature with a CLEAR functional name — never Body1 / Sketch23 /
 Component4. Examples: comp.name='Motor_Mount'; body.name='Base_Plate'; sketch.name='Bolt_Pattern';
