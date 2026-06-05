@@ -1829,10 +1829,10 @@ Compare the ACTUAL measurements against the dimensions the user requested.
             _send('success', '✓ מאומת — המידות תואמות לבקשה')
             return code
 
-        # Discrepancy found → remove the original (wrong) build, then build the fix.
+        # Discrepancy found → wipe EVERYTHING and rebuild the fix clean
+        # (clear_first guarantees no duplicate Body / Body(1) leftovers).
         _send('system', '⚙️ נמצאה סטייה — מתקן ובונה מחדש...')
-        _fire_and_wait({'mode': 'clear_since', 'mark': orig_mark}, timeout=15)
-        rb = _fire_and_wait({'mode': 'model', 'code': fixed})
+        rb = _fire_and_wait({'mode': 'model', 'code': fixed, 'clear_first': True})
         if rb.get('ok'):
             _last_code = fixed
             info = rb.get('info', {})
@@ -1841,10 +1841,9 @@ Compare the ACTUAL measurements against the dimensions the user requested.
             if info.get('params'):
                 _send_params(info['params'])
             return fixed
-        # Correction failed to build — the original was already removed, so
-        # rebuild the original code to avoid leaving the user with an empty doc.
+        # Correction failed — rebuild the original clean so the doc isn't empty.
         _send('system', f'התיקון נכשל — משחזר את המודל המקורי')
-        _fire_and_wait({'mode': 'model', 'code': code})
+        _fire_and_wait({'mode': 'model', 'code': code, 'clear_first': True})
         return code
     except Exception as e:
         _send('system', f'אימות דולג: {e}')
