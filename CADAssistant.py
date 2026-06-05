@@ -1006,6 +1006,13 @@ def _sanitize_build_code(code: str) -> str:
         stripped = line.strip()
 
         # rootComp.name = ... crashes (also comp.name / root.name / component.name)
+        # documents.add(...) spawns a NEW Untitled doc every run -> hits Fusion's
+        # document limit (Read-Only). Work on the provided active design instead.
+        if _re.search(r'documents\s*\.\s*add\s*\(', stripped):
+            safe_lines.append('# ' + line.lstrip() + '  # REMOVED: use the active design, do not create new documents')
+            i += 1
+            continue
+
         if _re.search(r'\b(rootComp|comp|root|component)\.name\s*=', stripped):
             safe_lines.append('# ' + line.lstrip() + '  # REMOVED: component name cannot be changed')
             i += 1
@@ -1136,6 +1143,23 @@ def _get_model_context() -> dict:
         }
     except Exception as e:
         return {'error': str(e)}
+
+
+def _clear_root(root):
+    """Wipe the active design to a clean slate (bodies, sketches, occurrences,
+    construction geometry). Run on the main thread BEFORE a fresh build/retry so
+    attempts don't accumulate Body / Body(1) / Body(2) duplicates."""
+    for name in ('bRepBodies', 'sketches', 'occurrences',
+                 'constructionPlanes', 'constructionAxes', 'constructionPoints'):
+        try:
+            coll = getattr(root, name)
+            while coll.count > 0:
+                try:
+                    coll.item(0).deleteMe()
+                except Exception:
+                    break
+        except Exception:
+            pass
 
 
 def _execute_build(code, app_ref):
@@ -1370,6 +1394,8 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
 
             if mode == 'model':
                 design = adsk.fusion.Design.cast(_app.activeProduct)
+                if payload.get('clear_first'):
+                    _clear_root(design.rootComponent)   # clean slate (esp. on retry)
                 _last_timeline_mark = design.timeline.count
                 ok, msg, info = _execute_build(payload['code'], _app)
                 _exec_result = {'ok': ok, 'msg': msg, 'info': info}
@@ -1549,6 +1575,7 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                     _exec_result = {'ok': False, 'msg': 'אין עיצוב פעיל'}
                 else:
                     rootComp = design.rootComponent
+                    _clear_root(rootComp)   # assemblies always start from a clean slate
                     ns = _make_namespace()
                     ns['adsk'] = adsk; ns['app'] = _app; ns['ui'] = _app.userInterface
                     ns['design'] = design; ns['rootComp'] = rootComp
@@ -1590,7 +1617,10 @@ class ExecuteCustomEvent(adsk.core.CustomEventHandler):
                                 result['ok'] = True
                             _exec_result = result
                     except Exception as e:
-                        _exec_result = {'ok': False, 'msg': '{}'.format(e)}
+                        emsg = '{}'.format(e)
+                        if 'one component' in emsg or 'Part Design' in emsg:
+                            emsg += '  ← המסמך במצב Part (component יחיד). פתח Design חדש (File → New Design) ונסה שוב.'
+                        _exec_result = {'ok': False, 'msg': emsg}
 
             elif mode == 'export':
                 ok, msg = _do_export(payload.get('fmt', 'step'))
@@ -2019,7 +2049,7 @@ Rewrite the COMPLETE def build() function, keeping the original design intent.""
                 if retry_code:
                     if show_code:
                         _send('code', retry_code[:1500])
-                    res = _fire_and_wait({'mode': 'model', 'code': retry_code})
+                    res = _fire_and_wait({'mode': 'model', 'code': retry_code, 'clear_first': True})
                     if res.get('ok'):
                         code = retry_code
                         break
@@ -2219,7 +2249,7 @@ Fix the build() function. Ensure all dims in CM, isComputeDeferred used correctl
                                        {'role': 'user', 'content': retry_msg}])
             retry_code = _extract_python(retry_resp, 'def build(')
             if retry_code:
-                res = _fire_and_wait({'mode': 'model', 'code': retry_code})
+                res = _fire_and_wait({'mode': 'model', 'code': retry_code, 'clear_first': True})
                 if res.get('ok'):
                     code = retry_code
         except Exception:
@@ -2519,27 +2549,20 @@ Define a single datum axis + origin at the top. Build each component's geometry 
 real assembled position relative to that datum (parts that share a rotation axis are
 concentric to the SAME axis, computed once). Parts must touch, not float.
 
-== RULE 3 — JOINTS (the motion) ==
-Connect components with joints. Supported jointMotion types and how to set them on a JointInput:
-- Rigid:       ji.setAsRigidJointMotion()
-- Revolute:    ji.setAsRevoluteJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
-- Slider:      ji.setAsSliderJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
-- Cylindrical: ji.setAsCylindricalJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
-- Planar:      ji.setAsPlanarJointMotion(adsk.fusion.JointDirections.ZAxisJointDirection)
-- Ball:        ji.setAsBallJointMotion(...)
-Joint creation (use a joint origin point ON the rotation/translation axis):
-    cpi = rootComp.constructionPoints.createInput()
-    cpi.setByPoint(adsk.core.Point3D.create(cm(ax), cm(ay), cm(az)))   # a point on the axis
-    pt = rootComp.constructionPoints.add(cpi)
-    geo0 = adsk.fusion.JointGeometry.createByPoint(pt)
-    ji = rootComp.joints.createInput(geo0, geo0)   # same axis origin for both halves
-    ji.occurrenceOne = occ_moving      # the part that MOVES
-    ji.occurrenceTwo = occ_fixed       # the reference part
-    ji.setAsRevoluteJointMotion(adsk.fusion.JointDirections.XAxisJointDirection)  # axis dir
-    joint = rootComp.joints.add(ji)
-Choose the JointDirection (X/Y/Z) to MATCH the real axis (the pin/shaft direction).
-Wrap each joint in try/except that re-raises with a clear step name (do NOT silently swallow —
-the assembly is only a success if joints exist).
+== RULE 3 — JOINTS (the motion) — USE AS-BUILT JOINTS ==
+You MUST use rootComp.asBuiltJoints — they join components in their CURRENT built
+position (parts stay put). NEVER use rootComp.joints with JointGeometry.createByCurve /
+createByPoint — that relocates parts and scatters them into a 'cross' shape. FORBIDDEN.
+As-built revolute joint (the reliable pattern):
+    ab  = rootComp.asBuiltJoints
+    jin = ab.createInput(occ_moving, occ_fixed, None)   # None geometry = join where they are
+    joint = ab.add(jin)
+    joint.setAsRevoluteJointMotion(adsk.fusion.JointDirections.XAxisJointDirection)  # axis dir
+Motion types (call on the JOINT after add): setAsRigidJointMotion() / setAsRevoluteJointMotion(dir) /
+setAsSliderJointMotion(dir) / setAsCylindricalJointMotion(dir) / setAsPlanarJointMotion(dir,n) / setAsBallJointMotion().
+Choose the JointDirection (X/Y/Z) to MATCH the real axis (pin/shaft direction).
+Wrap each joint in try/except that re-raises with a clear step name — the assembly is only a
+success if joints exist, so do NOT silently swallow.
 
 == RULE 4 — GROUND, LIMITS, DRIVE ==
 - Ground the base component:  occ_base.isGrounded = True
