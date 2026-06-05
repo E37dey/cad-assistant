@@ -6,6 +6,24 @@ CAD Assistant is a Fusion 360 add‑in that bridges natural language and CAD. Yo
 
 It supports four AI back‑ends — **Anthropic Claude**, **Google Gemini**, **Groq**, and local **Ollama** — and adds engineering features on top of pure modeling: GD&T analysis, material properties, manufacturing analysis, multi‑component assemblies, and STEP/STL export.
 
+![CAD Assistant panel](docs/images/panel.png)
+
+---
+
+## 🖼️ Gallery
+
+All of these were generated from a one‑line natural‑language description.
+
+### Parts
+| Spur gear | Flange coupling | L‑bracket |
+|---|---|---|
+| ![Spur gear](docs/images/part-spur-gear.png) | ![Flange coupling](docs/images/flange-coupling.png) | ![L-bracket](docs/images/part-l-bracket.png) |
+
+### Assemblies
+| Bearing in housing | Door hinge | Flange pipe coupling |
+|---|---|---|
+| ![Bearing assembly](docs/images/assembly-bearing.png) | ![Hinge assembly](docs/images/assembly-hinge.png) | ![Coupling assembly](docs/images/assembly-coupling.png) |
+
 ---
 
 ## ✨ Features
